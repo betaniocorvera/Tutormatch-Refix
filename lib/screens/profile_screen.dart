@@ -62,6 +62,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           label: 'Requests',
           onTap: () => Navigator.of(context).pushNamed(Routes.requests),
         ),
+        TMNavItem(
+          label: 'Messages',
+          onTap: () => Navigator.of(context).pushNamed(Routes.messages),
+        ),
         TMNavItem(label: 'Profile', selected: true),
       ],
       navTrailing: Row(

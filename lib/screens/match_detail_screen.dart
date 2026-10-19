@@ -73,7 +73,22 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       _noteError = null;
       _sent = true;
     });
-    AppStateScope.read(context).lastRequestReference = _reference;
+    final AppState state = AppStateScope.read(context);
+    state.lastRequestReference = _reference;
+    // The request is also a conversation from this moment on: pending, so the
+    // chat is locked until the other side accepts it.
+    state.startConversation(widget.result.candidate, note: note);
+  }
+
+  /// The live conversation with this person, once a request has turned into
+  /// one. Declined conversations do not count — asking again is allowed.
+  Conversation? _chatWith(AppState state, String id) {
+    for (final Conversation chat in state.conversations) {
+      if (chat.counterpartId == id && chat.status != RequestStatus.declined) {
+        return chat;
+      }
+    }
+    return null;
   }
 
   @override
@@ -89,12 +104,18 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     );
     final Candidate c = result.candidate;
     final String? when = describeOverlap(result.score.overlap);
-    // The viewer's own side of the conversation: a student checks their outbox,
-    // a tutor the requests they have received.
+    // The viewer's own side of the conversation: either a student's list of
+    // tutors or a tutor's list of students — whichever it is, it holds both
+    // requests sent and requests received.
     final List<MatchRequest> inbox = state.role == Role.student
         ? sampleRequests
         : sampleReceivedRequests;
+    // A request sent from here becomes a conversation in the same breath, so
+    // the conversation list is the honest check for "already asked": the static
+    // inbox cannot see what was sent a minute ago.
+    final Conversation? chat = _chatWith(state, c.id);
     final bool alreadyAsked = _sent ||
+        chat != null ||
         inbox.any((MatchRequest r) =>
             r.counterpartId == c.id && r.status != RequestStatus.declined);
 
@@ -166,6 +187,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       result: result,
       sent: _sent,
       alreadyAsked: alreadyAsked,
+      chat: chat,
       student: state.role == Role.student,
       reference: _reference,
       note: _note,
@@ -185,6 +207,10 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
         TMNavItem(
           label: 'Requests',
           onTap: () => Navigator.of(context).pushNamed(Routes.requests),
+        ),
+        TMNavItem(
+          label: 'Messages',
+          onTap: () => Navigator.of(context).pushNamed(Routes.messages),
         ),
         TMNavItem(
           label: 'Profile',
@@ -366,6 +392,7 @@ class _ActionPanel extends StatelessWidget {
     required this.result,
     required this.sent,
     required this.alreadyAsked,
+    required this.chat,
     required this.student,
     required this.reference,
     required this.note,
@@ -379,6 +406,9 @@ class _ActionPanel extends StatelessWidget {
   final MatchResult result;
   final bool sent;
   final bool alreadyAsked;
+
+  /// The student's live conversation with this person, when there is one.
+  final Conversation? chat;
   final bool student;
   final String reference;
   final TextEditingController note;
@@ -390,6 +420,15 @@ class _ActionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Who asked is a fact about the conversation when there is one; without a
+    // live conversation the static inbox says it — a student's list is their
+    // outbox, a tutor's is what arrived.
+    final bool askedByMe = chat?.requestedByMe ?? student;
+    // With a live conversation the answer lives in Messages; a static sample
+    // request has no conversation behind it and still points at Requests.
+    final String destination = chat == null ? Routes.requests : Routes.messages;
+    final String name = result.candidate.name;
+
     return TMEntry(
       floating: true,
       padding: const EdgeInsets.all(Space.xl),
@@ -428,29 +467,43 @@ class _ActionPanel extends StatelessWidget {
           const SizedBox(height: Space.xl),
           if (sent)
             _SentConfirmation(
-              name: result.candidate.name,
+              name: name,
               reference: reference,
-              student: student,
-              onOpenRequests: () =>
-                  Navigator.of(context).pushNamed(Routes.requests),
+              onOpenMessages: () =>
+                  Navigator.of(context).pushNamed(Routes.messages),
             )
           else if (alreadyAsked)
             TMInlineNote(
               tone: StatusTone.pending,
-              title: student
-                  ? 'You have already asked ${result.candidate.name}.'
-                  : '${result.candidate.name} has already asked you.',
-              body: student
-                  ? 'Their answer appears under Requests as soon as it comes in. '
-                      'Sending a second request does not move you up the queue.'
-                  : 'Their request is waiting under Requests, with the hours they '
-                      'suggested. Read it there before you decide anything.',
+              title: askedByMe
+                  ? 'You have already asked $name.'
+                  : '$name has already asked you.',
+              body: askedByMe
+                  ? chat == null
+                      ? 'Their answer appears under Requests as soon as it comes '
+                          'in. Sending a second request does not move you up the '
+                          'queue.'
+                      : chat!.status == RequestStatus.accepted
+                          ? 'You are already talking in Messages — open the '
+                              'conversation there to carry on where you left off.'
+                          : 'The request is waiting in Messages. Open the '
+                              'conversation there — the chat opens the moment they '
+                              'accept it.'
+                  : chat == null
+                      ? 'Their request is waiting under Requests, with the hours '
+                          'they suggested. Read it there before you decide '
+                          'anything.'
+                      : 'Their request is waiting in your Messages, with the '
+                          'hours they suggested. Answer it there — accepting '
+                          'opens the chat for both sides.',
               actions: <Widget>[
                 TMButton(
-                  label: student ? 'Open your requests' : 'Read their request',
+                  label: askedByMe
+                      ? (chat == null ? 'Open your requests' : 'Open your messages')
+                      : (chat == null ? 'Read their request' : 'Answer it in Messages'),
                   variant: TMButtonVariant.secondary,
                   minHeight: Hit.min,
-                  onPressed: () => Navigator.of(context).pushNamed(Routes.requests),
+                  onPressed: () => Navigator.of(context).pushNamed(destination),
                 ),
               ],
             )
@@ -513,7 +566,7 @@ class _RequestForm extends StatelessWidget {
         ),
         const SizedBox(height: Space.lg),
         TMButton(
-          label: student ? 'Send the request' : 'Send the offer',
+          label: 'Send request',
           expand: true,
           icon: TMIconName.arrowRight,
           onPressed: onSend,
@@ -570,14 +623,12 @@ class _SentConfirmation extends StatelessWidget {
   const _SentConfirmation({
     required this.name,
     required this.reference,
-    required this.student,
-    required this.onOpenRequests,
+    required this.onOpenMessages,
   });
 
   final String name;
   final String reference;
-  final bool student;
-  final VoidCallback onOpenRequests;
+  final VoidCallback onOpenMessages;
 
   @override
   Widget build(BuildContext context) {
@@ -587,31 +638,25 @@ class _SentConfirmation extends StatelessWidget {
         TMInlineNote(
           tone: StatusTone.accepted,
           title: 'Sent to $name.',
-          body: student
-              ? 'Reference $reference. They will accept or decline, and either '
-                  'answer appears under Requests — you do not have to check back '
-                  'here. Nothing was emailed: this is a prototype and the request '
-                  'only exists in this tab.'
-              : 'Reference $reference. They will accept or suggest another time. '
-                  'Nothing was emailed: this is a prototype, and the offer only '
-                  'exists in this panel.',
+          body: 'Reference $reference. The request is waiting in Messages — the '
+              'chat opens there the moment they accept it. Nothing was emailed: '
+              'this is a prototype, and the request only exists inside it.',
         ),
         const SizedBox(height: Space.lg),
         Wrap(
           spacing: Space.md,
           runSpacing: Space.sm,
           children: <Widget>[
-            if (student)
-              TMButton(
-                label: 'Open your requests',
-                variant: TMButtonVariant.secondary,
-                icon: TMIconName.arrowRight,
-                minHeight: Hit.min,
-                onPressed: onOpenRequests,
-              ),
+            TMButton(
+              label: 'Open your messages',
+              variant: TMButtonVariant.secondary,
+              icon: TMIconName.arrowRight,
+              minHeight: Hit.min,
+              onPressed: onOpenMessages,
+            ),
             TMButton(
               label: 'Keep reading the list',
-              variant: student ? TMButtonVariant.quiet : TMButtonVariant.secondary,
+              variant: TMButtonVariant.quiet,
               minHeight: Hit.min,
               onPressed: () => Navigator.of(context).pop(),
             ),

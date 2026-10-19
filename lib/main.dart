@@ -6,16 +6,18 @@
 // lib/data/mock_data.dart. Google sign-in and email/password both simply move to
 // the next screen, which is the entire behaviour they are asked to have.
 //
-// Routing is one switch in [onGenerateRoute]. No router package: there are eight
+// Routing is one switch in [onGenerateRoute]. No router package: there are ten
 // screens and they all take plain arguments.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
 import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/screens/chat_screen.dart';
 import 'package:tutormatch/screens/landing_screen.dart';
 import 'package:tutormatch/screens/login_screen.dart';
 import 'package:tutormatch/screens/match_detail_screen.dart';
 import 'package:tutormatch/screens/matches_screen.dart';
+import 'package:tutormatch/screens/messages_screen.dart';
 import 'package:tutormatch/screens/onboarding_screen.dart';
 import 'package:tutormatch/screens/profile_screen.dart';
 import 'package:tutormatch/screens/register_screen.dart';
@@ -35,6 +37,8 @@ abstract final class Routes {
   static const String matches = '/matches';
   static const String matchDetail = '/match';
   static const String requests = '/requests';
+  static const String messages = '/messages';
+  static const String chat = '/chat';
   static const String profile = '/profile';
 }
 
@@ -97,6 +101,13 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
         return build(const MatchesScreen());
       case Routes.requests:
         return build(const RequestsScreen());
+      case Routes.messages:
+        return build(const MessagesScreen());
+      case Routes.chat:
+        // A conversation id, not a conversation: the chat reads the live one.
+        final Object? id = args;
+        if (id is String) return build(ChatScreen(conversationId: id));
+        return build(const MessagesScreen());
       case Routes.profile:
         return build(const ProfileScreen());
       case Routes.landing:

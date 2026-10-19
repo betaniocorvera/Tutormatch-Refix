@@ -21,10 +21,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/screens/chat_screen.dart';
 import 'package:tutormatch/screens/landing_screen.dart';
 import 'package:tutormatch/screens/login_screen.dart';
 import 'package:tutormatch/screens/match_detail_screen.dart';
 import 'package:tutormatch/screens/matches_screen.dart';
+import 'package:tutormatch/screens/messages_screen.dart';
 import 'package:tutormatch/screens/onboarding_screen.dart';
 import 'package:tutormatch/screens/profile_screen.dart';
 import 'package:tutormatch/screens/register_screen.dart';
@@ -175,6 +177,31 @@ void main() {
       final AppState tutor = AppState()..role = Role.tutor;
       await render(tester, const RequestsScreen(), size,
           state: tutor, label: 'Requests received');
+    });
+
+    testWidgets('messages renders on both sides $at', (WidgetTester tester) async {
+      await render(tester, const MessagesScreen(), size,
+          label: 'Messages (student)');
+      final AppState tutor = AppState()..role = Role.tutor;
+      await render(tester, const MessagesScreen(), size,
+          state: tutor, label: 'Messages (tutor)');
+    });
+
+    testWidgets('a conversation renders in each state its request can be in $at',
+        (WidgetTester tester) async {
+      await render(tester, const ChatScreen(conversationId: 'c-1041'), size,
+          label: 'Chat, accepted');
+      await render(tester, const ChatScreen(conversationId: 'c-1038'), size,
+          label: 'Chat, waiting on their answer (student side)');
+      await render(tester, const ChatScreen(conversationId: 'c-1042'), size,
+          label: 'Chat, owes an answer (student side)');
+      await render(tester, const ChatScreen(conversationId: 'c-1030'), size,
+          label: 'Chat, declined');
+      final AppState tutor = AppState()..role = Role.tutor;
+      await render(tester, const ChatScreen(conversationId: 'c-2009'), size,
+          state: tutor, label: 'Chat, owes an answer (tutor side)');
+      await render(tester, const ChatScreen(conversationId: 'c-2012'), size,
+          state: tutor, label: 'Chat, waiting on their answer (tutor side)');
     });
 
     testWidgets('profile renders on both sides $at', (WidgetTester tester) async {

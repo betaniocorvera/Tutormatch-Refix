@@ -408,6 +408,81 @@ class MatchRequest {
   final bool outgoing;
 }
 
+/// One line in a conversation. [fromMe] is written from the side the list
+/// belongs to, like [MatchRequest.outgoing]: the same exchange reads
+/// differently on the two sides, and neither list is the other one flipped.
+class ChatMessage {
+  const ChatMessage({
+    required this.text,
+    required this.fromMe,
+    required this.sentAt,
+  });
+
+  final String text;
+  final bool fromMe;
+
+  /// Wall-clock label, e.g. `18:42`. A string because the sample data is
+  /// authored rather than observed, and so that the clock never drifts between
+  /// a screenshot and the run that produced it.
+  final String sentAt;
+}
+
+/// The clock label a live message carries. Zero-padded, so a column of
+/// timestamps lines up the way the rest of the figures in this product do.
+String clockLabel(DateTime time) => '${time.hour.toString().padLeft(2, '0')}:'
+    '${time.minute.toString().padLeft(2, '0')}';
+
+/// A request that has turned into a conversation, or is waiting to. The status
+/// is the request's status, and it is the whole gate: only an accepted
+/// conversation can be typed into. Pending reads as locked — either waiting for
+/// the other side to answer, or holding an answer this side still owes —
+/// declined as closed with the answer still on it.
+///
+/// One conversation per counterpart — the one-to-one case is the only case
+/// this product has.
+class Conversation {
+  const Conversation({
+    required this.id,
+    required this.counterpartId,
+    required this.counterpartName,
+    required this.counterpartRole,
+    required this.subject,
+    required this.status,
+    required this.requestedByMe,
+    this.messages = const <ChatMessage>[],
+  });
+
+  final String id;
+  final String counterpartId;
+  final String counterpartName;
+  final Role counterpartRole;
+
+  /// What the request was about. Shown under the name in the chat header and
+  /// in the list, so a conversation says more than who it is with.
+  final String subject;
+  final RequestStatus status;
+
+  /// Who sent the request, from the point of view of the list that holds this
+  /// conversation. Either side can send one, so "pending" alone does not say
+  /// whether this side is waiting or owes an answer — this does.
+  final bool requestedByMe;
+  final List<ChatMessage> messages;
+
+  ChatMessage? get lastMessage => messages.isEmpty ? null : messages.last;
+
+  Conversation copyWith({RequestStatus? status, List<ChatMessage>? messages}) =>
+      Conversation(
+        id: id,
+        counterpartId: counterpartId,
+        counterpartName: counterpartName,
+        counterpartRole: counterpartRole,
+        subject: subject,
+        status: status ?? this.status,
+        requestedByMe: requestedByMe,
+        messages: messages ?? this.messages,
+      );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scoring
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1990,6 +2065,276 @@ const List<MatchRequest> sampleReceivedRequests = <MatchRequest>[
         'in person if that is easier.',
     reply: 'I teach online, and my week is mostly evenings — Daniel Reyes '
         'teaches in Camden in the afternoons and would be the better fit.',
+  ),
+];
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Conversations — what a request turns into
+//
+// Two lists, one per side, the same way the request inboxes above work. Either
+// side can send a request, so each list carries both directions: a pending one
+// this side must answer, a pending one it is waiting on, two accepted threads
+// with real talking in them, and one declined with the refusal readable. A
+// student reads [sampleConversations]; a tutor reads
+// [sampleReceivedConversations].
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// A student's side. The counterpart is a tutor, `fromMe` is the student
+/// talking, and `requestedByMe` says which way the asking went — the tutor's
+/// offer at the top is the one this side has to answer.
+const List<Conversation> sampleConversations = <Conversation>[
+  Conversation(
+    id: 'c-1042',
+    counterpartId: 't-hana',
+    counterpartName: 'Hana Suzuki',
+    counterpartRole: Role.tutor,
+    subject: 'Physics',
+    status: RequestStatus.pending,
+    requestedByMe: false,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'I saw your mock is in eleven weeks. I have Tuesday and Friday '
+            'evenings free, and we would start with the mechanics questions — '
+            'the ones that cost marks under time. Shall I put you down for '
+            'Tuesday?',
+        fromMe: false,
+        sentAt: '11:26',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-1041',
+    counterpartId: 't-amara',
+    counterpartName: 'Amara Okonkwo',
+    counterpartRole: Role.tutor,
+    subject: 'Calculus',
+    status: RequestStatus.accepted,
+    requestedByMe: true,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'Mock in eleven weeks. I can do weekday evenings after six, or '
+            'Saturday morning if that is easier for you.',
+        fromMe: true,
+        sentAt: '18:04',
+      ),
+      ChatMessage(
+        text: 'Yes — Tuesday and Thursday are free from next week. Send me '
+            'your last mock paper and I will look at it before we start.',
+        fromMe: false,
+        sentAt: '20:12',
+      ),
+      ChatMessage(
+        text: 'Sent it this morning. Question 7 is the one that keeps going '
+            'wrong — I run out of time before the last part.',
+        fromMe: true,
+        sentAt: '07:41',
+      ),
+      ChatMessage(
+        text: 'Read it. Your opening move is fine, the marks go in the last '
+            'two lines. We will fix exactly that on Tuesday.',
+        fromMe: false,
+        sentAt: '08:15',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-1040',
+    counterpartId: 't-samir',
+    counterpartName: 'Samir Haddad',
+    counterpartRole: Role.tutor,
+    subject: 'SAT Prep',
+    status: RequestStatus.accepted,
+    requestedByMe: true,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'I need speed more than theory — the timing is what kills me, '
+            'I never finish the last section.',
+        fromMe: true,
+        sentAt: '16:20',
+      ),
+      ChatMessage(
+        text: 'Then we start with timed sections and an error log. Bring the '
+            'last two papers you sat, wrong answers included.',
+        fromMe: false,
+        sentAt: '17:05',
+      ),
+      ChatMessage(
+        text: 'Deal. Thursday after school, or Saturday morning if you '
+            'prefer it quieter.',
+        fromMe: true,
+        sentAt: '17:22',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-1038',
+    counterpartId: 't-liang',
+    counterpartName: 'Liang Chen',
+    counterpartRole: Role.tutor,
+    subject: 'Calculus and Physics',
+    status: RequestStatus.pending,
+    requestedByMe: true,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'Interested in both subjects together if that works. I am free '
+            'Tuesday and Friday evenings.',
+        fromMe: true,
+        sentAt: '19:10',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-1030',
+    counterpartId: 't-marcus',
+    counterpartName: 'Marcus Bell',
+    counterpartRole: Role.tutor,
+    subject: 'Essay Writing',
+    status: RequestStatus.declined,
+    requestedByMe: true,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'I know you are in person only — I could travel on Thursdays if '
+            'that is possible.',
+        fromMe: true,
+        sentAt: '12:30',
+      ),
+      ChatMessage(
+        text: 'Afraid not — my Thursdays filled up for the term. Rachel Osei '
+            'does the same work online and she is good. Worth trying her.',
+        fromMe: false,
+        sentAt: '15:12',
+      ),
+    ],
+  ),
+];
+
+/// A tutor's side. The counterpart is a student, `fromMe` is the tutor talking.
+/// The two pending threads sit first: one waits on this side's answer, the
+/// other on the student's.
+const List<Conversation> sampleReceivedConversations = <Conversation>[
+  Conversation(
+    id: 'c-2009',
+    counterpartId: 's-aisha',
+    counterpartName: 'Aisha Rahman',
+    counterpartRole: Role.student,
+    subject: 'Statistics',
+    status: RequestStatus.pending,
+    requestedByMe: false,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'Grade 8 predicted and I need a 9 for the course I want. I do '
+            'not need the ideas explained again — I need speed under time '
+            'pressure and fewer careless errors.',
+        fromMe: false,
+        sentAt: '18:47',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-2012',
+    counterpartId: 's-kai',
+    counterpartName: 'Kai Nakamura',
+    counterpartRole: Role.student,
+    subject: 'Statistics',
+    status: RequestStatus.pending,
+    requestedByMe: true,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'Your cycling data is the kind of project I like teaching '
+            'against. Two evenings a week and we finish the analysis properly — '
+            'starting with the parts that are already half-done. Interested?',
+        fromMe: true,
+        sentAt: '09:14',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-2011',
+    counterpartId: 's-maya',
+    counterpartName: 'Maya Chen',
+    counterpartRole: Role.student,
+    subject: 'Calculus and Physics',
+    status: RequestStatus.accepted,
+    requestedByMe: false,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'Mock in eleven weeks. I can do weekday evenings after six, or '
+            'Saturday morning if that is easier for you.',
+        fromMe: false,
+        sentAt: '18:04',
+      ),
+      ChatMessage(
+        text: 'Yes — Tuesday and Thursday are free from next week. Send me '
+            'your last mock paper and I will look at it before we start.',
+        fromMe: true,
+        sentAt: '20:12',
+      ),
+      ChatMessage(
+        text: 'Sent it this morning. Question 7 is the one that keeps going '
+            'wrong — I run out of time before the last part.',
+        fromMe: false,
+        sentAt: '07:41',
+      ),
+      ChatMessage(
+        text: 'Read it. Your opening move is fine, the marks go in the last '
+            'two lines. We will fix exactly that on Tuesday.',
+        fromMe: true,
+        sentAt: '08:15',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-2003',
+    counterpartId: 's-ethan',
+    counterpartName: 'Ethan Brooks',
+    counterpartRole: Role.student,
+    subject: 'Calculus',
+    status: RequestStatus.accepted,
+    requestedByMe: false,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'I have one free morning a week and I would rather use two hours '
+            'of it. I want the derivations, not shortcuts.',
+        fromMe: false,
+        sentAt: '10:02',
+      ),
+      ChatMessage(
+        text: 'Then we take Saturdays. Bring the further maths book — we '
+            'build each result from the definition up, nothing accepted on '
+            'trust.',
+        fromMe: true,
+        sentAt: '10:31',
+      ),
+      ChatMessage(
+        text: 'Perfect. Same time next week?',
+        fromMe: false,
+        sentAt: '10:40',
+      ),
+    ],
+  ),
+  Conversation(
+    id: 'c-1998',
+    counterpartId: 's-owen',
+    counterpartName: 'Owen Pratt',
+    counterpartRole: Role.student,
+    subject: 'Algebra',
+    status: RequestStatus.declined,
+    requestedByMe: false,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'I lost the thread somewhere in year 8 and nobody noticed. I '
+            'would rather rebuild it than keep pretending. Weekday '
+            'afternoons, in person if that works.',
+        fromMe: false,
+        sentAt: '17:15',
+      ),
+      ChatMessage(
+        text: 'I teach online and my week is mostly evenings — Daniel Reyes '
+            'teaches in Camden in the afternoons and would be the better fit.',
+        fromMe: true,
+        sentAt: '19:02',
+      ),
+    ],
   ),
 ];
 

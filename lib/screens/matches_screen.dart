@@ -80,6 +80,10 @@ class _MatchesScreenState extends State<MatchesScreen> {
           onTap: () => Navigator.of(context).pushNamed(Routes.requests),
         ),
         TMNavItem(
+          label: 'Messages',
+          onTap: () => Navigator.of(context).pushNamed(Routes.messages),
+        ),
+        TMNavItem(
           label: 'Profile',
           onTap: () => Navigator.of(context).pushNamed(Routes.profile),
         ),
@@ -160,6 +164,12 @@ class _MatchesScreenState extends State<MatchesScreen> {
       return const _RankingInProgress();
     }
 
+    // The static inbox is the side you are standing on: a student's outbox of
+    // asks, a tutor's list of what arrived. The live conversations are checked
+    // in the loop below, so a request sent a minute ago counts too.
+    final List<MatchRequest> inbox =
+        state.role == Role.student ? sampleRequests : sampleReceivedRequests;
+
     if (outcome.empty != null) {
       final EmptyExplanation empty = outcome.empty!;
       return TMEmptyState(
@@ -239,16 +249,22 @@ class _MatchesScreenState extends State<MatchesScreen> {
             fromProfile: state.profileAnswered,
             profileSummary: state.profileSummary,
             requested: _askedHere.contains(results[i].candidate.id) ||
-                sampleRequests.any((MatchRequest r) =>
+                state.conversations.any((Conversation chat) =>
+                    chat.counterpartId == results[i].candidate.id &&
+                    chat.status != RequestStatus.declined) ||
+                inbox.any((MatchRequest r) =>
                     r.counterpartId == results[i].candidate.id &&
                     r.status != RequestStatus.declined),
             onOpen: () => Navigator.of(context).pushNamed(
               Routes.matchDetail,
               arguments: results[i],
             ),
-            onQuickRequest: () => setState(
-              () => _askedHere.add(results[i].candidate.id),
-            ),
+            onQuickRequest: () {
+              // A quick request is a request: it becomes a conversation, and
+              // the card says so from the same source the Messages screen reads.
+              state.startConversation(results[i].candidate);
+              setState(() => _askedHere.add(results[i].candidate.id));
+            },
           ),
         ],
       ],

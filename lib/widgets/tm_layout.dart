@@ -525,7 +525,10 @@ class TMEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget box = AnimatedContainer(
+    // The surface is captured before the control is built around it: the
+    // builder below must close over the surface itself, never over the whole
+    // control, or the entry ends up inside itself.
+    final Widget surface = AnimatedContainer(
       duration: Motion.fast,
       curve: Motion.ease,
       padding: padding,
@@ -550,9 +553,9 @@ class TMEntry extends StatelessWidget {
       child: child,
     );
 
-    if (onTap == null) return box;
+    if (onTap == null) return surface;
 
-    box = TMFocusable(
+    return TMFocusable(
       onTap: onTap,
       semanticLabel: semanticLabel,
       builder: (BuildContext context, TMState s) => TMFocusRing(
@@ -562,10 +565,9 @@ class TMEntry extends StatelessWidget {
           duration: Motion.fast,
           curve: Motion.ease,
           transform: Matrix4.translationValues(0, s.hovered ? -1 : 0, 0),
-          child: box,
+          child: surface,
         ),
       ),
     );
-    return box;
   }
 }

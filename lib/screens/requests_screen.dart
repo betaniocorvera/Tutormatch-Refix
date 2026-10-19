@@ -57,6 +57,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
         ),
         TMNavItem(label: 'Requests', selected: true),
         TMNavItem(
+          label: 'Messages',
+          onTap: () => Navigator.of(context).pushNamed(Routes.messages),
+        ),
+        TMNavItem(
           label: 'Profile',
           onTap: () => Navigator.of(context).pushNamed(Routes.profile),
         ),
@@ -427,16 +431,16 @@ class _RequestEntry extends StatelessWidget {
     );
   }
 
-  /// The tutor's side of the same stub. Answering is the one action a tutor
-  /// would take from this screen, so it is named and then honestly declined —
-  /// the mirror of withdrawing on the student side.
+  /// The tutor's side of the same stub. Answering itself lives in Messages now,
+  /// where the live conversation is; this static sample list only says so.
   void _explainAnswer(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: AppColors.ink,
         content: Text(
-          'Answering is not part of this prototype. In the real product this would '
-          'accept or decline the request and send the shared hours back if it is a yes.',
+          'This list is a static sample. Requests with a conversation behind '
+          'them are answered in Messages — Accept and Decline sit on the '
+          'request there, and accepting opens the chat for both sides.',
           style: AppType.bodySmall.tone(AppColors.onAccent),
         ),
       ),

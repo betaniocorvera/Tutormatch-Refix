@@ -62,6 +62,149 @@ class AppState extends ChangeNotifier {
   List<Candidate> get pool =>
       _role == Role.student ? sampleTutors : sampleStudents;
 
+  // ── Conversations ──────────────────────────────────────────────────────────
+  //
+  // The one place in this prototype where sending something does more than
+  // change the screen it was sent from: a request becomes a conversation, the
+  // other side's answer opens it, and what is typed into it stays until reload.
+  // Either side can send, either side can answer — every entry says which way
+  // the asking went. Seeded from the sample lists, then edited in memory only.
+
+  final List<Conversation> _studentChats =
+      List<Conversation>.of(sampleConversations);
+  final List<Conversation> _tutorChats =
+      List<Conversation>.of(sampleReceivedConversations);
+
+  /// The conversations for the side you are standing on: what a student sees on
+  /// their messages, and what a tutor sees on theirs.
+  List<Conversation> get conversations =>
+      _role == Role.student ? _studentChats : _tutorChats;
+
+  /// The conversation with [id], whichever side it belongs to. The screen that
+  /// is open must keep working if the role is switched underneath it.
+  Conversation? conversation(String id) {
+    for (final List<Conversation> list
+        in <List<Conversation>>[_studentChats, _tutorChats]) {
+      for (final Conversation c in list) {
+        if (c.id == id) return c;
+      }
+    }
+    return null;
+  }
+
+  /// Puts a request into the current side's list as a pending conversation,
+  /// with the note as its first message — from this side, whoever this side is.
+  /// Asking again re-opens that person's conversation rather than stacking a
+  /// second one — one conversation per person, in every state — and a
+  /// conversation that is already accepted is left alone, because there is
+  /// nothing left to ask for.
+  void startConversation(Candidate counterpart, {String? note}) {
+    final List<Conversation> list = conversations;
+    final int existing =
+        list.indexWhere((Conversation c) => c.counterpartId == counterpart.id);
+    if (existing >= 0 && list[existing].status == RequestStatus.accepted) {
+      return;
+    }
+    if (existing >= 0) list.removeAt(existing);
+    list.insert(
+      0,
+      Conversation(
+        id: 'c-${counterpart.id}',
+        counterpartId: counterpart.id,
+        counterpartName: counterpart.name,
+        counterpartRole: counterpart.role,
+        subject: counterpart.subjects.first,
+        status: RequestStatus.pending,
+        requestedByMe: true,
+        messages: <ChatMessage>[
+          if (note != null && note.trim().isNotEmpty)
+            ChatMessage(
+              text: note.trim(),
+              fromMe: true,
+              sentAt: clockLabel(DateTime.now()),
+            ),
+        ],
+      ),
+    );
+    notifyListeners();
+  }
+
+  /// The receiver's two answers. Both unlock or close the chat; neither can be
+  /// taken back here, which is what makes the status worth reading.
+  void acceptConversation(String id) =>
+      _setConversationStatus(id, RequestStatus.accepted);
+  void declineConversation(String id) =>
+      _setConversationStatus(id, RequestStatus.declined);
+
+  void _setConversationStatus(String id, RequestStatus status) {
+    for (final List<Conversation> list
+        in <List<Conversation>>[_studentChats, _tutorChats]) {
+      final int i = list.indexWhere((Conversation c) => c.id == id);
+      if (i < 0) continue;
+      if (list[i].status == status) return;
+      list[i] = list[i].copyWith(status: status);
+      notifyListeners();
+      return;
+    }
+  }
+
+  /// Sends [text] from this side. It lands immediately; about a second and a
+  /// half later the other side answers once — the whole of the other side's
+  /// behaviour in this prototype. It answers only if the last word is still
+  /// yours, so three quick lines earn one reply, not three.
+  void sendMessage(String id, String text) {
+    final String body = text.trim();
+    final Conversation? current = conversation(id);
+    if (body.isEmpty ||
+        current == null ||
+        current.status != RequestStatus.accepted) {
+      return;
+    }
+    _appendMessage(
+      id,
+      ChatMessage(
+        text: body,
+        fromMe: true,
+        sentAt: clockLabel(DateTime.now()),
+      ),
+    );
+    Future<void>.delayed(const Duration(milliseconds: 1500), () {
+      final Conversation? latest = conversation(id);
+      if (latest == null ||
+          latest.status != RequestStatus.accepted ||
+          latest.messages.isEmpty ||
+          !latest.messages.last.fromMe) {
+        return;
+      }
+      _appendMessage(
+        id,
+        ChatMessage(
+          text: _autoReply,
+          fromMe: false,
+          sentAt: clockLabel(DateTime.now()),
+        ),
+      );
+    });
+  }
+
+  /// The other side's entire vocabulary here: one line, sent once, after every
+  /// message you write. There is nobody at the other end of this prototype.
+  static const String _autoReply =
+      'Got it — give me a moment and I will come back to you properly.';
+
+  void _appendMessage(String id, ChatMessage message) {
+    for (final List<Conversation> list
+        in <List<Conversation>>[_studentChats, _tutorChats]) {
+      final int i = list.indexWhere((Conversation c) => c.id == id);
+      if (i < 0) continue;
+      list[i] = list[i].copyWith(
+        messages: <ChatMessage>[...list[i].messages, message],
+      );
+      notifyListeners();
+      return;
+    }
+  }
+
   /// A one-line description of the answers the ranking actually used. Shown on
   /// the "based on your profile" chip and in the empty state, so the label is
   /// never a vague assurance.

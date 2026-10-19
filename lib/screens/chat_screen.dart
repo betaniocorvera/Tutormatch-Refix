@@ -9,10 +9,20 @@
 // The composer only exists while the request is accepted. A pending thread
 // either says who it is waiting for or carries the decision itself, depending
 // on which side sent the request; a declined one stays readable and closed.
+//
+// Once it opens, the conversation can hold more than sentences: a picked photo,
+// a simulated voice note, a call the app records, and a session proposal with
+// two answers in it. All of it is local state, and the photo bytes never leave
+// this tab.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/screens/call_screen.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/tm_avatar.dart';
@@ -35,19 +45,47 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _text = TextEditingController();
   final ScrollController _scroll = ScrollController();
+  final ImagePicker _picker = ImagePicker();
 
   /// How many messages the thread had at the last build. Any change — this
   /// side's, or the scripted answer's — puts the thread back at its foot.
   int _seen = -1;
 
+  /// The typing row appears and disappears without changing the message count,
+  /// so it gets its own edge detector.
+  bool _wasTyping = false;
+
+  bool _emojiOpen = false;
+  bool _attachOpen = false;
+
+  /// Recording is a local simulation: a timer, a red dot, and a duration. No
+  /// microphone is opened and no audio is ever produced.
+  bool _recording = false;
+  Duration _recorded = Duration.zero;
+  Timer? _recordTimer;
+
+  /// The picked picture, waiting for Send. Bytes in memory, as everywhere else.
+  Uint8List? _pendingPhoto;
+
+  /// The panel of twenty-four. Small enough to scan, large enough to be useful.
+  static const List<String> _emojis = <String>[
+    '😀', '😄', '😊', '😂', '🙂', '😉',
+    '😍', '🤔', '😅', '😮', '😢', '😭',
+    '😡', '👍', '👎', '👏', '🙏', '🎉',
+    '❤️', '🔥', '✅', '📚', '📝', '⏰',
+  ];
+
   @override
   void dispose() {
+    _recordTimer?.cancel();
     _text.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  void _send() {
+  // ── Sending ────────────────────────────────────────────────────────────────
+
+  void _sendText() {
     final String text = _text.text.trim();
     if (text.isEmpty) return;
     _text.clear();
@@ -55,6 +93,154 @@ class _ChatScreenState extends State<ChatScreen> {
     // The field is now empty, so the send button has to go back to disabled.
     setState(() {});
   }
+
+  Future<void> _pickPhoto() async {
+    setState(() {
+      _attachOpen = false;
+      _emojiOpen = false;
+    });
+    try {
+      final XFile? file = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        maxHeight: 1600,
+      );
+      if (file == null || !mounted) return;
+      final Uint8List bytes = await file.readAsBytes();
+      if (!mounted) return;
+      setState(() => _pendingPhoto = bytes);
+    } on Exception {
+      // A browser with no file picker, or a cancelled permission: say so rather
+      // than dying on a tap.
+      if (!mounted) return;
+      _say('This device would not open a picture picker.');
+    }
+  }
+
+  void _sendPhoto() {
+    final Uint8List? photo = _pendingPhoto;
+    if (photo == null) return;
+    AppStateScope.read(context).sendImage(widget.conversationId, photo);
+    setState(() => _pendingPhoto = null);
+  }
+
+  void _startRecording() {
+    _recordTimer?.cancel();
+    setState(() {
+      _recording = true;
+      _recorded = Duration.zero;
+      _emojiOpen = false;
+      _attachOpen = false;
+    });
+    _recordTimer = Timer.periodic(const Duration(seconds: 1), (Timer _) {
+      if (!mounted) return;
+      setState(() => _recorded += const Duration(seconds: 1));
+    });
+  }
+
+  void _cancelRecording() {
+    _recordTimer?.cancel();
+    setState(() {
+      _recording = false;
+      _recorded = Duration.zero;
+    });
+  }
+
+  void _sendVoice() {
+    final int seconds = _recorded.inSeconds < 1 ? 1 : _recorded.inSeconds;
+    AppStateScope.read(context).sendVoice(widget.conversationId, seconds);
+    _recordTimer?.cancel();
+    setState(() {
+      _recording = false;
+      _recorded = Duration.zero;
+    });
+  }
+
+  // ── The small extras ──────────────────────────────────────────────────────
+
+  void _toggleEmoji() {
+    setState(() {
+      _emojiOpen = !_emojiOpen;
+      _attachOpen = false;
+    });
+  }
+
+  void _toggleAttach() {
+    setState(() {
+      _attachOpen = !_attachOpen;
+      _emojiOpen = false;
+    });
+  }
+
+  /// Inserts at the caret, not at the end: an emoji is part of a sentence being
+  /// written, not an addition to a finished one.
+  void _insertEmoji(String emoji) {
+    final TextEditingValue value = _text.value;
+    final bool hasSelection = value.selection.isValid;
+    final int start = hasSelection ? value.selection.start : value.text.length;
+    final int end = hasSelection ? value.selection.end : value.text.length;
+    final String next = value.text.replaceRange(start, end, emoji);
+    _text.value = value.copyWith(
+      text: next,
+      selection: TextSelection.collapsed(offset: start + emoji.length),
+      composing: TextRange.empty,
+    );
+    setState(() {});
+  }
+
+  Future<void> _proposeSession() async {
+    setState(() {
+      _attachOpen = false;
+      _emojiOpen = false;
+    });
+    final DateTime now = DateTime.now();
+    final DateTime? day = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(days: 2)),
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: DateTime(now.year + 1, now.month, now.day),
+      helpText: 'Which day?',
+    );
+    if (day == null || !mounted) return;
+    final TimeOfDay? time = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 17, minute: 0),
+      helpText: 'What time?',
+    );
+    if (time == null || !mounted) return;
+    AppStateScope.read(context).proposeSession(
+      widget.conversationId,
+      DateTime(day.year, day.month, day.day, time.hour, time.minute),
+    );
+  }
+
+  void _openPhoto(Uint8List bytes) {
+    showDialog<void>(
+      context: context,
+      barrierColor: AppColors.ink.withValues(alpha: 0.94),
+      builder: (BuildContext context) => _PhotoViewer(bytes: bytes),
+    );
+  }
+
+  void _startCall(CallKind kind) {
+    Navigator.of(context).push(
+      TMTransitions.page<void>(
+        CallScreen(conversationId: widget.conversationId, kind: kind),
+        name: '/call',
+      ),
+    );
+  }
+
+  void _say(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: AppColors.ink,
+        content: Text(text, style: AppType.bodySmall.tone(AppColors.onAccent)),
+      ),
+    );
+  }
+
+  // ── Layout ─────────────────────────────────────────────────────────────────
 
   void _toBottom({required bool jump}) {
     if (!mounted || !_scroll.hasClients) return;
@@ -91,6 +277,14 @@ class _ChatScreenState extends State<ChatScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _toBottom(jump: first));
     }
 
+    final bool typing = state.isTyping(c.id);
+    if (typing != _wasTyping) {
+      _wasTyping = typing;
+      if (typing) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _toBottom(jump: false));
+      }
+    }
+
     return Scaffold(
       backgroundColor: AppColors.paper,
       body: SafeArea(
@@ -100,8 +294,9 @@ class _ChatScreenState extends State<ChatScreen> {
             _ChatHeader(
               conversation: c,
               onBack: () => Navigator.of(context).maybePop(),
+              onCall: _startCall,
             ),
-            Expanded(child: _thread(context, c)),
+            Expanded(child: _thread(context, c, typing)),
             _footer(context, state, c),
           ],
         ),
@@ -109,8 +304,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _thread(BuildContext context, Conversation c) {
-    if (c.messages.isEmpty) {
+  Widget _thread(BuildContext context, Conversation c, bool typing) {
+    if (c.messages.isEmpty && !typing) {
       final String first = c.counterpartName.split(' ').first;
       final String empty = switch (c.status) {
         RequestStatus.accepted =>
@@ -134,6 +329,13 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     }
 
+    // Delivery belongs under the last thing this side actually sent. The answer
+    // is "Seen" once a line from the other side follows it — which is the whole
+    // of read-receipts in a prototype with one other person.
+    final ChatMessage? lastMine = c.lastMine;
+    final bool seen = lastMine != null && c.seen(lastMine);
+    final int count = c.messages.length + (typing ? 1 : 0);
+
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: AppBreakpoints.maxContent),
@@ -143,19 +345,38 @@ class _ChatScreenState extends State<ChatScreen> {
             horizontal: TMLayout.gutter(context),
             vertical: Space.xl,
           ),
-          itemCount: c.messages.length,
-          itemBuilder: (BuildContext context, int i) => Padding(
-            padding: EdgeInsets.only(
-              bottom: i == c.messages.length - 1 ? 0 : Space.lg,
-            ),
-            child: _Bubble(
-              message: c.messages[i],
-              name: c.counterpartName,
-              // Whoever the conversation is with, their avatar is drawn from
-              // the one pool row that knows what they look like.
-              tint: candidateById(c.counterpartId)?.photoTint,
-            ),
-          ),
+          itemCount: count,
+          itemBuilder: (BuildContext context, int i) {
+            if (typing && i == c.messages.length) {
+              return _TypingBubble(
+                name: c.counterpartName,
+                tint: candidateById(c.counterpartId)?.photoTint,
+              );
+            }
+            final ChatMessage message = c.messages[i];
+            final String? delivery = c.status == RequestStatus.accepted &&
+                    message == lastMine
+                ? (seen ? 'Seen' : 'Sent')
+                : null;
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: i == count - 1 ? 0 : Space.lg,
+              ),
+              child: _Bubble(
+                message: message,
+                name: c.counterpartName,
+                // Whoever the conversation is with, their avatar is drawn from
+                // the one pool row that knows what they look like.
+                tint: candidateById(c.counterpartId)?.photoTint,
+                delivery: delivery,
+                onOpenPhoto: _openPhoto,
+                onAnswerSession: message.id == null
+                    ? null
+                    : (SessionState answer) => AppStateScope.read(context)
+                        .answerSession(c.id, message.id!, answer),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -171,11 +392,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final String first = c.counterpartName.split(' ').first;
 
     final Widget body = switch (c.status) {
-      RequestStatus.accepted => _Composer(
-          controller: _text,
-          onChanged: () => setState(() {}),
-          onSend: _send,
-        ),
+      RequestStatus.accepted => _composerArea(context),
       RequestStatus.pending => askedByMe
           ? TMInlineNote(
               tone: StatusTone.pending,
@@ -236,6 +453,377 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
+
+  /// The bar and everything that unfolds above it. On a phone the four
+  /// affordances collapse into one + menu; the field and Send never move.
+  Widget _composerArea(BuildContext context) {
+    final bool compact = TMLayout.isCompact(context);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (_pendingPhoto != null) ...<Widget>[
+          _photoDraft(context),
+          const SizedBox(height: Space.md),
+        ],
+        if (_emojiOpen) ...<Widget>[
+          _emojiPanel(context),
+          const SizedBox(height: Space.md),
+        ],
+        if (_attachOpen && compact) ...<Widget>[
+          _attachPanel(context),
+          const SizedBox(height: Space.md),
+        ],
+        if (_recording)
+          _recordingBar(context)
+        else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              if (compact)
+                _ChatIconButton(
+                  icon: TMIconName.plus,
+                  tooltip: 'More ways to send',
+                  active: _attachOpen || _emojiOpen,
+                  onTap: _toggleAttach,
+                )
+              else ...<Widget>[
+                _ChatIconButton(
+                  icon: TMIconName.image,
+                  tooltip: 'Send a photo',
+                  onTap: _pickPhoto,
+                ),
+                _ChatIconButton(
+                  icon: TMIconName.mic,
+                  tooltip: 'Record a voice note',
+                  onTap: _startRecording,
+                ),
+                _ChatIconButton(
+                  icon: TMIconName.calendar,
+                  tooltip: 'Propose a session',
+                  onTap: _proposeSession,
+                ),
+              ],
+              const SizedBox(width: Space.sm),
+              Expanded(child: _messageField()),
+              if (!compact) ...<Widget>[
+                const SizedBox(width: Space.sm),
+                _ChatIconButton(
+                  icon: TMIconName.emoji,
+                  tooltip: 'Insert an emoji',
+                  active: _emojiOpen,
+                  onTap: _toggleEmoji,
+                ),
+              ],
+              const SizedBox(width: Space.md),
+              TMButton(
+                label: 'Send',
+                icon: TMIconName.arrowRight,
+                minHeight: Hit.min,
+                onPressed: _text.text.trim().isEmpty ? null : _sendText,
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _messageField() {
+    return TextField(
+      controller: _text,
+      onChanged: (_) => setState(() {}),
+      onSubmitted: (_) => _sendText(),
+      textInputAction: TextInputAction.send,
+      style: AppType.body,
+      cursorWidth: 1.5,
+      cursorRadius: const Radius.circular(1),
+      decoration: InputDecoration(
+        isDense: true,
+        filled: true,
+        fillColor: AppColors.paperRaised,
+        hintText: 'Write a message',
+        hintStyle: AppType.body.tone(AppColors.inkMuted),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: Space.lg,
+          vertical: Space.md,
+        ),
+        constraints: const BoxConstraints(minHeight: Hit.min),
+        border: OutlineInputBorder(
+          borderRadius: Radii.sharpAll,
+          borderSide: const BorderSide(color: AppColors.ruleStrong),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: Radii.sharpAll,
+          borderSide: const BorderSide(color: AppColors.ruleStrong),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: Radii.sharpAll,
+          borderSide: const BorderSide(color: AppColors.ink, width: 2),
+        ),
+      ),
+    );
+  }
+
+  /// The selected picture, held back until it is wanted: sending it is a
+  /// separate decision from choosing it.
+  Widget _photoDraft(BuildContext context) {
+    final Uint8List bytes = _pendingPhoto!;
+    return Container(
+      padding: const EdgeInsets.all(Space.md),
+      decoration: BoxDecoration(
+        color: AppColors.paperRaised,
+        border: Border.all(color: AppColors.ruleStrong),
+        borderRadius: Radii.sharpAll,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              ClipRRect(
+                borderRadius: Radii.sharpAll,
+                child: SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: Image.memory(
+                    bytes,
+                    fit: BoxFit.cover,
+                    errorBuilder: (BuildContext context, Object error, StackTrace? stack) =>
+                        const ColoredBox(color: AppColors.paperSunken),
+                  ),
+                ),
+              ),
+              const SizedBox(width: Space.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('Photo ready to send', style: AppType.label),
+                    const SizedBox(height: Space.xxs),
+                    Text(
+                      'It lives in memory only. Nothing is uploaded.',
+                      style: AppType.bodySmall.quieter,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.sm),
+          Wrap(
+            spacing: Space.sm,
+            runSpacing: Space.sm,
+            alignment: WrapAlignment.end,
+            children: <Widget>[
+              TMButton(
+                label: 'Send photo',
+                icon: TMIconName.arrowRight,
+                minHeight: Hit.min,
+                onPressed: _sendPhoto,
+              ),
+              TMButton(
+                label: 'Cancel',
+                variant: TMButtonVariant.secondary,
+                minHeight: Hit.min,
+                onPressed: () => setState(() => _pendingPhoto = null),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Recording takes the place of the field, as the task asks: there is
+  /// nothing to type while a take is running, and two decisions to make.
+  Widget _recordingBar(BuildContext context) {
+    final bool compact = TMLayout.isCompact(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Space.md,
+        vertical: Space.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.paperRaised,
+        border: Border.all(color: AppColors.accent),
+        borderRadius: Radii.sharpAll,
+      ),
+      child: Row(
+        children: <Widget>[
+          const SizedBox(
+            width: 10,
+            height: 10,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppColors.accent,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: Space.md),
+          Text(
+            elapsedClock(_recorded),
+            style: AppType.figure.tone(AppColors.ink),
+          ),
+          if (!compact) ...<Widget>[
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: Text(
+                'Recording a voice note',
+                style: AppType.bodySmall.quieter,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ] else
+            const Spacer(),
+          TMButton(
+            label: 'Cancel',
+            variant: TMButtonVariant.quiet,
+            minHeight: Hit.min,
+            onPressed: _cancelRecording,
+          ),
+          const SizedBox(width: Space.sm),
+          TMButton(
+            label: 'Send',
+            icon: TMIconName.arrowRight,
+            minHeight: Hit.min,
+            onPressed: _sendVoice,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Twenty-four common emoji, each on a full tap target. Scrolls inside a
+  /// fixed height so the thread above never disappears entirely.
+  Widget _emojiPanel(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(Space.sm),
+      decoration: BoxDecoration(
+        color: AppColors.paperRaised,
+        border: Border.all(color: AppColors.rule),
+        borderRadius: Radii.softAll,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: Space.sm,
+                  vertical: Space.xs,
+                ),
+                child: TMMicroLabelText('Emoji'),
+              ),
+              const Spacer(),
+              _ChatIconButton(
+                icon: TMIconName.close,
+                tooltip: 'Close the emoji panel',
+                onTap: () => setState(() => _emojiOpen = false),
+              ),
+            ],
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 188),
+            child: SingleChildScrollView(
+              child: Wrap(
+                children: <Widget>[
+                  for (final String emoji in _emojis)
+                    TMFocusable(
+                      onTap: () => _insertEmoji(emoji),
+                      semanticLabel: 'Insert $emoji',
+                      semanticButton: false,
+                      builder: (BuildContext context, TMState s) => TMFocusRing(
+                        focused: s.focused,
+                        radius: Radii.sharp,
+                        child: Container(
+                          width: Hit.min,
+                          height: Hit.min,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: s.hovered || s.focused
+                                ? AppColors.paperSunken
+                                : Colors.transparent,
+                            borderRadius: Radii.sharpAll,
+                          ),
+                          child: Text(emoji, style: AppType.emoji),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The narrow-width alternative to four icons: one +, four labelled actions.
+  Widget _attachPanel(BuildContext context) {
+    void close() => setState(() => _attachOpen = false);
+
+    return Container(
+      padding: const EdgeInsets.all(Space.md),
+      decoration: BoxDecoration(
+        color: AppColors.paperRaised,
+        border: Border.all(color: AppColors.rule),
+        borderRadius: Radii.softAll,
+      ),
+      child: Wrap(
+        spacing: Space.sm,
+        runSpacing: Space.sm,
+        children: <Widget>[
+          TMButton(
+            label: 'Photo',
+            icon: TMIconName.image,
+            variant: TMButtonVariant.secondary,
+            minHeight: Hit.min,
+            onPressed: () {
+              close();
+              _pickPhoto();
+            },
+          ),
+          TMButton(
+            label: 'Voice note',
+            icon: TMIconName.mic,
+            variant: TMButtonVariant.secondary,
+            minHeight: Hit.min,
+            onPressed: () {
+              close();
+              _startRecording();
+            },
+          ),
+          TMButton(
+            label: 'Emoji',
+            icon: TMIconName.emoji,
+            variant: TMButtonVariant.secondary,
+            minHeight: Hit.min,
+            onPressed: () {
+              setState(() {
+                _attachOpen = false;
+                _emojiOpen = true;
+              });
+            },
+          ),
+          TMButton(
+            label: 'Propose a session',
+            icon: TMIconName.calendar,
+            variant: TMButtonVariant.secondary,
+            minHeight: Hit.min,
+            onPressed: () {
+              close();
+              _proposeSession();
+            },
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,14 +831,24 @@ class _ChatScreenState extends State<ChatScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ChatHeader extends StatelessWidget {
-  const _ChatHeader({required this.conversation, required this.onBack});
+  const _ChatHeader({
+    required this.conversation,
+    required this.onBack,
+    required this.onCall,
+  });
 
   final Conversation conversation;
   final VoidCallback onBack;
+  final ValueChanged<CallKind> onCall;
 
   @override
   Widget build(BuildContext context) {
     final Conversation c = conversation;
+    final bool accepted = c.status == RequestStatus.accepted;
+    // The status pill is redundant once an accepted thread is open, and on a
+    // phone the two call buttons are worth more than the label.
+    final bool showPill = !accepted || !TMLayout.isCompact(context);
+
     return DecoratedBox(
       decoration: const BoxDecoration(
         color: AppColors.paper,
@@ -266,7 +864,11 @@ class _ChatHeader extends StatelessWidget {
             ),
             child: Row(
               children: <Widget>[
-                _BackButton(onTap: onBack),
+                _ChatIconButton(
+                  icon: TMIconName.arrowLeft,
+                  tooltip: 'Back to messages',
+                  onTap: onBack,
+                ),
                 const SizedBox(width: Space.sm),
                 TMAvatar(
                   c.counterpartName,
@@ -295,8 +897,28 @@ class _ChatHeader extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: Space.md),
-                TMStatusPill(tone: c.status.tone, label: c.status.label, dense: true),
+                if (showPill) ...<Widget>[
+                  const SizedBox(width: Space.md),
+                  TMStatusPill(
+                    tone: c.status.tone,
+                    label: c.status.label,
+                    dense: true,
+                  ),
+                ],
+                if (accepted) ...<Widget>[
+                  const SizedBox(width: Space.sm),
+                  _ChatIconButton(
+                    icon: TMIconName.phone,
+                    tooltip: 'Start a voice call',
+                    onTap: () => onCall(CallKind.voice),
+                  ),
+                  const SizedBox(width: Space.xs),
+                  _ChatIconButton(
+                    icon: TMIconName.video,
+                    tooltip: 'Start a video call',
+                    onTap: () => onCall(CallKind.video),
+                  ),
+                ],
               ],
             ),
           ),
@@ -306,32 +928,53 @@ class _ChatHeader extends StatelessWidget {
   }
 }
 
-class _BackButton extends StatelessWidget {
-  const _BackButton({required this.onTap});
+/// One square action, 44 px, with a hover and focus state from the shared
+/// vocabulary. Back, the two call buttons and every composer icon are this.
+class _ChatIconButton extends StatelessWidget {
+  const _ChatIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.active = false,
+    this.onInk = false,
+  });
 
+  final TMIconName icon;
+  final String tooltip;
   final VoidCallback onTap;
+  final bool active;
+  final bool onInk;
 
   @override
   Widget build(BuildContext context) {
-    return TMFocusable(
-      onTap: onTap,
-      semanticLabel: 'Back',
-      builder: (BuildContext context, TMState s) => TMFocusRing(
-        focused: s.focused,
-        radius: Radii.sharp,
-        child: SizedBox(
-          width: Hit.min,
-          height: Hit.min,
-          child: AnimatedContainer(
-            duration: Motion.fast,
-            decoration: BoxDecoration(
-              color: s.hovered || s.focused
-                  ? AppColors.paperSunken
-                  : Colors.transparent,
-              borderRadius: Radii.sharpAll,
-            ),
-            child: const Center(
-              child: TMIcon(TMIconName.arrowLeft, size: 20),
+    final Color base = onInk ? AppColors.onAccent : AppColors.ink;
+    final Color fill = onInk
+        ? AppColors.onAccent.withValues(alpha: 0.16)
+        : AppColors.paperSunken;
+
+    return Tooltip(
+      message: tooltip,
+      child: TMFocusable(
+        onTap: onTap,
+        semanticLabel: tooltip,
+        builder: (BuildContext context, TMState s) => TMFocusRing(
+          focused: s.focused,
+          radius: Radii.sharp,
+          child: SizedBox(
+            width: Hit.min,
+            height: Hit.min,
+            child: AnimatedContainer(
+              duration: Motion.fast,
+              curve: Motion.ease,
+              decoration: BoxDecoration(
+                color: active || s.hovered || s.focused
+                    ? fill
+                    : Colors.transparent,
+                borderRadius: Radii.sharpAll,
+              ),
+              child: Center(
+                child: TMIcon(icon, size: 20, color: base),
+              ),
             ),
           ),
         ),
@@ -343,7 +986,14 @@ class _BackButton extends StatelessWidget {
 /// One message and its time. Mine on the accent at the right; theirs on
 /// sunken paper at the left, with the avatar that says who is talking.
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, required this.name, this.tint});
+  const _Bubble({
+    required this.message,
+    required this.name,
+    this.tint,
+    this.delivery,
+    this.onOpenPhoto,
+    this.onAnswerSession,
+  });
 
   final ChatMessage message;
   final String name;
@@ -351,30 +1001,40 @@ class _Bubble extends StatelessWidget {
   /// The counterpart's stand-in for a picture, when they have one.
   final Color? tint;
 
+  /// `Sent` or `Seen`, and only under the last line this side sent.
+  final String? delivery;
+
+  final ValueChanged<Uint8List>? onOpenPhoto;
+  final ValueChanged<SessionState>? onAnswerSession;
+
+  bool get _mine => message.fromMe;
+
   @override
   Widget build(BuildContext context) {
-    final bool mine = message.fromMe;
-    final Widget bubble = Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: Space.lg,
-        vertical: Space.md,
-      ),
-      decoration: BoxDecoration(
-        color: mine ? AppColors.accent : AppColors.paperSunken,
-        border: mine ? null : Border.all(color: AppColors.rule),
-        borderRadius: Radii.sharpAll,
-      ),
-      child: Text(
-        message.text,
-        style: AppType.body.tone(mine ? AppColors.onAccent : AppColors.ink),
-      ),
-    );
+    // A call is an event in the thread, not a message with a side.
+    if (message.kind == MessageKind.call) {
+      return _CallLine(message: message);
+    }
+
+    final Widget content = switch (message.kind) {
+      MessageKind.text => _textBubble(),
+      MessageKind.image =>
+        _ImageBubble(image: message.image, onOpen: onOpenPhoto),
+      MessageKind.voice => _VoiceBubble(message: message, mine: _mine),
+      MessageKind.session => _SessionCard(
+          message: message,
+          name: name,
+          onAnswer: onAnswerSession,
+        ),
+      MessageKind.call => const SizedBox.shrink(),
+    };
+
     final Widget stamp = Text(
-      message.sentAt,
+      delivery == null ? message.sentAt : '${message.sentAt} · $delivery',
       style: AppType.micro.tone(AppColors.inkMuted),
     );
 
-    if (mine) {
+    if (_mine) {
       return Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: <Widget>[
@@ -384,7 +1044,7 @@ class _Bubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: <Widget>[
-                  bubble,
+                  content,
                   const SizedBox(height: Space.xs),
                   stamp,
                 ],
@@ -409,7 +1069,7 @@ class _Bubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                bubble,
+                content,
                 const SizedBox(height: Space.xs),
                 stamp,
               ],
@@ -419,70 +1079,504 @@ class _Bubble extends StatelessWidget {
       ],
     );
   }
+
+  Widget _textBubble() {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Space.lg,
+        vertical: Space.md,
+      ),
+      decoration: BoxDecoration(
+        color: _mine ? AppColors.accent : AppColors.paperSunken,
+        border: _mine ? null : Border.all(color: AppColors.rule),
+        borderRadius: Radii.sharpAll,
+      ),
+      child: Text(
+        message.text,
+        style: AppType.body.tone(
+          _mine ? AppColors.onAccent : AppColors.ink,
+        ),
+      ),
+    );
+  }
 }
 
-/// The field and the send button. Enter sends as well, because the keyboard is
-/// where the sentence just came from.
-class _Composer extends StatelessWidget {
-  const _Composer({
-    required this.controller,
-    required this.onChanged,
-    required this.onSend,
-  });
+/// A rounded picture bubble: the one shape in the product that is allowed the
+/// soft radius, because a photograph is a thing placed on the page rather than
+/// a row of it. Tapping opens it full-screen.
+class _ImageBubble extends StatelessWidget {
+  const _ImageBubble({required this.image, required this.onOpen});
 
-  final TextEditingController controller;
-  final VoidCallback onChanged;
-  final VoidCallback onSend;
+  final Uint8List? image;
+  final ValueChanged<Uint8List>? onOpen;
+
+  static const double _width = 260;
+  static const double _height = 170;
 
   @override
   Widget build(BuildContext context) {
-    final bool ready = controller.text.trim().isNotEmpty;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: <Widget>[
-        Expanded(
-          child: TextField(
-            controller: controller,
-            onChanged: (_) => onChanged(),
-            onSubmitted: (_) => onSend(),
-            textInputAction: TextInputAction.send,
-            style: AppType.body,
-            cursorWidth: 1.5,
-            cursorRadius: const Radius.circular(1),
-            decoration: InputDecoration(
-              isDense: true,
-              filled: true,
-              fillColor: AppColors.paperRaised,
-              hintText: 'Write a message',
-              hintStyle: AppType.body.tone(AppColors.inkMuted),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: Space.lg,
-                vertical: Space.md,
-              ),
-              constraints: const BoxConstraints(minHeight: Hit.min),
-              border: OutlineInputBorder(
-                borderRadius: Radii.sharpAll,
-                borderSide: const BorderSide(color: AppColors.ruleStrong),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: Radii.sharpAll,
-                borderSide: const BorderSide(color: AppColors.ruleStrong),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: Radii.sharpAll,
-                borderSide: const BorderSide(color: AppColors.ink, width: 2),
+    final Uint8List? bytes = image;
+    if (bytes == null) {
+      return Container(
+        width: _width,
+        height: _height,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppColors.paperSunken,
+          border: Border.all(color: AppColors.rule),
+          borderRadius: Radii.softAll,
+        ),
+        child: Text('This photo is no longer here', style: AppType.bodySmall.quieter),
+      );
+    }
+
+    return TMFocusable(
+      onTap: onOpen == null ? null : () => onOpen!(bytes),
+      semanticLabel: 'Open the photo full screen',
+      builder: (BuildContext context, TMState s) => TMFocusRing(
+        focused: s.focused,
+        radius: Radii.soft,
+        child: Container(
+          width: _width,
+          height: _height,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: AppColors.paperSunken,
+            borderRadius: Radii.softAll,
+            border: Border.all(color: AppColors.ruleStrong),
+          ),
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (BuildContext context, Object error, StackTrace? stack) =>
+                Center(
+              child: Padding(
+                padding: const EdgeInsets.all(Space.lg),
+                child: Text(
+                  'This photo could not be shown.',
+                  textAlign: TextAlign.center,
+                  style: AppType.bodySmall.quieter,
+                ),
               ),
             ),
           ),
         ),
-        const SizedBox(width: Space.md),
-        TMButton(
-          label: 'Send',
-          icon: TMIconName.arrowRight,
-          minHeight: Hit.min,
-          onPressed: ready ? onSend : null,
+      ),
+    );
+  }
+}
+
+/// A voice note with no audio: a play mark, an authored waveform, a duration,
+/// and an animation that runs exactly as long as the note claims to.
+class _VoiceBubble extends StatefulWidget {
+  const _VoiceBubble({required this.message, required this.mine});
+
+  final ChatMessage message;
+  final bool mine;
+
+  @override
+  State<_VoiceBubble> createState() => _VoiceBubbleState();
+}
+
+class _VoiceBubbleState extends State<_VoiceBubble>
+    with SingleTickerProviderStateMixin {
+  static const List<double> _heights = <double>[
+    6, 11, 16, 8, 19, 13, 22, 9, 17, 21,
+    12, 18, 7, 15, 20, 10, 16, 22, 13, 19,
+    9, 14,
+  ];
+
+  late final AnimationController _play = AnimationController(
+    vsync: this,
+    duration: Duration(seconds: widget.message.seconds < 1 ? 1 : widget.message.seconds),
+  );
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _play.addStatusListener((AnimationStatus status) {
+      if (status == AnimationStatus.completed && mounted) {
+        setState(() {
+          _playing = false;
+          _play.value = 0;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _play.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    if (_playing) {
+      _play.stop();
+      setState(() => _playing = false);
+      return;
+    }
+    if (_play.value >= 1) _play.value = 0;
+    _play.forward();
+    setState(() => _playing = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool mine = widget.mine;
+    final Color fg = mine ? AppColors.onAccent : AppColors.ink;
+    final Color played = mine ? AppColors.onAccent : AppColors.ink;
+    final Color rest = mine
+        ? AppColors.onAccent.withValues(alpha: 0.38)
+        : AppColors.ruleStrong;
+
+    return Container(
+      padding: const EdgeInsets.only(
+        left: Space.xs,
+        right: Space.md,
+        top: Space.xs,
+        bottom: Space.xs,
+      ),
+      decoration: BoxDecoration(
+        color: mine ? AppColors.accent : AppColors.paperSunken,
+        border: mine ? null : Border.all(color: AppColors.rule),
+        borderRadius: Radii.sharpAll,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Tooltip(
+            message: _playing ? 'Pause the voice note' : 'Play the voice note',
+            child: TMFocusable(
+              onTap: _toggle,
+              semanticLabel: _playing
+                  ? 'Pause the voice note'
+                  : 'Play the voice note, ${voiceLabel(widget.message.seconds)}',
+              builder: (BuildContext context, TMState s) => TMFocusRing(
+                focused: s.focused,
+                radius: Radii.sharp,
+                child: SizedBox(
+                  width: Hit.min,
+                  height: Hit.min,
+                  child: Center(
+                    child: TMIcon(
+                      _playing ? TMIconName.pause : TMIconName.play,
+                      size: 18,
+                      color: fg,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: Space.xs),
+          AnimatedBuilder(
+            animation: _play,
+            builder: (BuildContext context, Widget? child) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                for (int i = 0; i < _heights.length; i++)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      right: i == _heights.length - 1 ? 0 : 2,
+                    ),
+                    child: Container(
+                      width: 2,
+                      height: _heights[i],
+                      color: i / (_heights.length - 1) <= _play.value
+                          ? played
+                          : rest,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: Space.md),
+          Text(
+            voiceLabel(widget.message.seconds),
+            style: AppType.figure.tone(fg),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A session proposal. The date is the subject; the two answers live in the
+/// card until one is chosen, and then the card says which.
+class _SessionCard extends StatelessWidget {
+  const _SessionCard({
+    required this.message,
+    required this.name,
+    required this.onAnswer,
+  });
+
+  final ChatMessage message;
+  final String name;
+  final ValueChanged<SessionState>? onAnswer;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool proposed = message.sessionState == SessionState.proposed;
+    final String when =
+        message.sessionWhen.isEmpty ? 'Time to be agreed' : message.sessionWhen;
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(Space.lg),
+        decoration: BoxDecoration(
+          color: AppColors.paperRaised,
+          border: Border.all(color: AppColors.ruleStrong),
+          borderRadius: Radii.sharpAll,
         ),
-      ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                const TMIcon(
+                  TMIconName.calendar,
+                  size: 15,
+                  color: AppColors.inkSecondary,
+                ),
+                const SizedBox(width: Space.sm),
+                const TMMicroLabelText('Session proposal'),
+              ],
+            ),
+            const SizedBox(height: Space.md),
+            Text(when, style: AppType.sectionTitle),
+            const SizedBox(height: Space.xs),
+            Text(
+              message.fromMe
+                  ? 'You proposed this time.'
+                  : '$name proposed this time.',
+              style: AppType.bodySmall.quieter,
+            ),
+            const SizedBox(height: Space.lg),
+            if (proposed)
+              Wrap(
+                spacing: Space.sm,
+                runSpacing: Space.sm,
+                children: <Widget>[
+                  TMButton(
+                    label: 'Accept',
+                    icon: TMIconName.check,
+                    minHeight: Hit.min,
+                    onPressed: onAnswer == null
+                        ? null
+                        : () => onAnswer!(SessionState.accepted),
+                  ),
+                  TMButton(
+                    label: 'Decline',
+                    variant: TMButtonVariant.secondary,
+                    minHeight: Hit.min,
+                    onPressed: onAnswer == null
+                        ? null
+                        : () => onAnswer!(SessionState.declined),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: <Widget>[
+                  TMStatusPill(
+                    tone: message.sessionState.tone,
+                    label: message.sessionState.label,
+                    dense: true,
+                  ),
+                  const SizedBox(width: Space.sm),
+                  Flexible(
+                    child: Text(
+                      message.sessionState == SessionState.accepted
+                          ? 'The time is held.'
+                          : 'The proposal is closed.',
+                      style: AppType.bodySmall.quieter,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A call the app recorded. Centered and quiet, because it happened between the
+/// messages rather than being one of them.
+class _CallLine extends StatelessWidget {
+  const _CallLine({required this.message});
+
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool video = message.text.startsWith('Video');
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          TMIcon(
+            video ? TMIconName.video : TMIconName.phone,
+            size: 14,
+            color: AppColors.inkMuted,
+          ),
+          const SizedBox(width: Space.sm),
+          Text(message.text, style: AppType.micro.tone(AppColors.inkMuted)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Three dots while the scripted answer is being composed. The only other
+/// looping animation in the product, and like the progress rule it exists
+/// because "they are writing" has no static shape.
+class _TypingBubble extends StatefulWidget {
+  const _TypingBubble({required this.name, this.tint});
+
+  final String name;
+  final Color? tint;
+
+  @override
+  State<_TypingBubble> createState() => _TypingBubbleState();
+}
+
+class _TypingBubbleState extends State<_TypingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _dots = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _dots.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '${widget.name} is typing',
+      child: ExcludeSemantics(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.only(top: Space.xs),
+              child: TMAvatar(widget.name, size: 28, tint: widget.tint),
+            ),
+            const SizedBox(width: Space.sm),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: Space.lg,
+                vertical: Space.md,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.paperSunken,
+                border: Border.all(color: AppColors.rule),
+                borderRadius: Radii.sharpAll,
+              ),
+              child: AnimatedBuilder(
+                animation: _dots,
+                builder: (BuildContext context, Widget? child) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    for (int i = 0; i < 3; i++)
+                      Padding(
+                        padding: EdgeInsets.only(left: i == 0 ? 0 : Space.xs),
+                        child: Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppColors.inkMuted.withValues(
+                              alpha: 0.25 + 0.75 * _pulse(i),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A triangular wave rather than a sine: same read, no import needed.
+  double _pulse(int i) {
+    final double t = (_dots.value + i * 0.2) % 1;
+    return t < 0.5 ? t * 2 : (1 - t) * 2;
+  }
+}
+
+/// The photo, alone on ink, at the size the window allows. Picked bytes only:
+/// nothing here is fetched, so there is nothing to wait for but the decode.
+class _PhotoViewer extends StatelessWidget {
+  const _PhotoViewer({required this.bytes});
+
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return TMInkContext(
+      onInk: true,
+      child: Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(Space.lg),
+        child: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            InteractiveViewer(
+              minScale: 1,
+              maxScale: 4,
+              child: Padding(
+                // Room for the close button, and a margin so a bright photo
+                // never runs into the edge of the window.
+                padding: const EdgeInsets.fromLTRB(
+                  Space.xl,
+                  Space.xxxl,
+                  Space.xl,
+                  Space.xl,
+                ),
+                child: SizedBox.expand(
+                  child: Image.memory(
+                    bytes,
+                    fit: BoxFit.contain,
+                    errorBuilder: (BuildContext context, Object error,
+                            StackTrace? stack) =>
+                        Center(
+                      child: Text(
+                        'This photo could not be shown.',
+                        style: AppType.bodySmall.tone(AppColors.onAccent),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              right: 0,
+              child: _ChatIconButton(
+                icon: TMIconName.close,
+                tooltip: 'Close the photo',
+                onTap: () => Navigator.of(context).pop(),
+                onInk: true,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

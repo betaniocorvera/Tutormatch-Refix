@@ -279,6 +279,10 @@ abstract final class AppType {
   /// label on a table, never an eyebrow above a heading.
   static TextStyle get micro => _sans(11, FontWeight.w600, 1.25, tracking: 0.1);
 
+  /// Emoji are glyphs, not a typeface; this only fixes the size they are set
+  /// at in the picker. The platform supplies the drawing.
+  static TextStyle get emoji => _sans(22, FontWeight.w400, 1.2);
+
   // ── Numerals — always tabular ─────────────────────────────────────────────
   /// The match score. The single largest number in the product.
   static TextStyle get score => _sans(40, FontWeight.w700, 1.0, tracking: -0.03, tabular: true);

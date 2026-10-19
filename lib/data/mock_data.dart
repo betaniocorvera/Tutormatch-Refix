@@ -27,8 +27,10 @@
 // skip onboarding. Walk the onboarding flow and the time dimension moves.
 // ═════════════════════════════════════════════════════════════════════════════
 
+import 'dart:typed_data';
 import 'dart:ui' show Color;
 
+import 'package:tutormatch/data/sample_photo.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -577,6 +579,27 @@ class MatchRequest {
   final bool outgoing;
 }
 
+/// What a line in a conversation is. Text is the default, so every sample
+/// message written before the rich composer existed still reads as one.
+enum MessageKind { text, image, voice, call, session }
+
+/// Where a proposed session stands. Only [proposed] has two answers in it.
+enum SessionState { proposed, accepted, declined }
+
+extension SessionStateCopy on SessionState {
+  String get label => switch (this) {
+        SessionState.proposed => 'Proposed',
+        SessionState.accepted => 'Accepted',
+        SessionState.declined => 'Declined',
+      };
+
+  StatusTone get tone => switch (this) {
+        SessionState.proposed => StatusTone.pending,
+        SessionState.accepted => StatusTone.accepted,
+        SessionState.declined => StatusTone.declined,
+      };
+}
+
 /// One line in a conversation. [fromMe] is written from the side the list
 /// belongs to, like [MatchRequest.outgoing]: the same exchange reads
 /// differently on the two sides, and neither list is the other one flipped.
@@ -585,8 +608,20 @@ class ChatMessage {
     required this.text,
     required this.fromMe,
     required this.sentAt,
+    this.id,
+    this.kind = MessageKind.text,
+    this.image,
+    this.seconds = 0,
+    this.sessionWhen = '',
+    this.sessionState = SessionState.proposed,
   });
 
+  /// Stable only for messages this run created (and for the one sample session
+  /// card that can be answered). Sample lines without ids never need to change.
+  final String? id;
+
+  /// The words. Every kind keeps a readable line here, because the inbox needs
+  /// a one-line preview for a photo and a call as much as for a sentence.
   final String text;
   final bool fromMe;
 
@@ -594,12 +629,82 @@ class ChatMessage {
   /// authored rather than observed, and so that the clock never drifts between
   /// a screenshot and the run that produced it.
   final String sentAt;
+
+  final MessageKind kind;
+
+  /// The picked picture, in memory only. Never a path, never a URL.
+  final Uint8List? image;
+
+  /// Length of a voice note. There is no audio; this is the duration the
+  /// waveform pretends to play for.
+  final int seconds;
+
+  /// `Thu 22 Oct · 17:30`, already written out because the card is a document.
+  final String sessionWhen;
+  final SessionState sessionState;
+
+  /// An answer is final, so the only edit a message ever needs.
+  ChatMessage copyWith({SessionState? sessionState}) => ChatMessage(
+        id: id,
+        text: text,
+        fromMe: fromMe,
+        sentAt: sentAt,
+        kind: kind,
+        image: image,
+        seconds: seconds,
+        sessionWhen: sessionWhen,
+        sessionState: sessionState ?? this.sessionState,
+      );
 }
 
 /// The clock label a live message carries. Zero-padded, so a column of
 /// timestamps lines up the way the rest of the figures in this product do.
 String clockLabel(DateTime time) => '${time.hour.toString().padLeft(2, '0')}:'
     '${time.minute.toString().padLeft(2, '0')}';
+
+/// `02:14` — a call length, and the recording timer. Minutes are padded so the
+/// running figure does not jump sideways when it crosses ten.
+String elapsedClock(Duration duration) {
+  final int total = duration.inSeconds < 0 ? 0 : duration.inSeconds;
+  return '${(total ~/ 60).toString().padLeft(2, '0')}:'
+      '${(total % 60).toString().padLeft(2, '0')}';
+}
+
+/// `0:14` — the short form printed on a voice note.
+String voiceLabel(int seconds) {
+  final int total = seconds < 0 ? 0 : seconds;
+  return '${total ~/ 60}:${(total % 60).toString().padLeft(2, '0')}';
+}
+
+const List<String> _weekdayShort = <String>[
+  'Mon',
+  'Tue',
+  'Wed',
+  'Thu',
+  'Fri',
+  'Sat',
+  'Sun',
+];
+
+const List<String> _monthShort = <String>[
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/// `Thu 22 Oct · 17:30` — a proposed session, the way it is written on the card.
+String describeSession(DateTime at) =>
+    '${_weekdayShort[at.weekday - 1]} ${at.day} '
+    '${_monthShort[at.month - 1]} · ${clockLabel(at)}';
 
 /// A request that has turned into a conversation, or is waiting to. The status
 /// is the request's status, and it is the whole gate: only an accepted
@@ -638,6 +743,25 @@ class Conversation {
   final List<ChatMessage> messages;
 
   ChatMessage? get lastMessage => messages.isEmpty ? null : messages.last;
+
+  /// The last line this side wrote that can carry a delivery state. A call line
+  /// is an event the app recorded, not something a person sent, so it is not
+  /// the message "Seen" belongs under.
+  ChatMessage? get lastMine {
+    for (int i = messages.length - 1; i >= 0; i--) {
+      final ChatMessage m = messages[i];
+      if (m.fromMe && m.kind != MessageKind.call) return m;
+    }
+    return null;
+  }
+
+  /// Read when the other side has written since. There is nobody at the other
+  /// end of this prototype, so a reply is the whole of "they saw it".
+  bool seen(ChatMessage message) {
+    final int i = messages.indexOf(message);
+    if (i < 0) return false;
+    return messages.skip(i + 1).any((ChatMessage later) => !later.fromMe);
+  }
 
   Conversation copyWith({RequestStatus? status, List<ChatMessage>? messages}) =>
       Conversation(
@@ -2392,16 +2516,80 @@ const List<MatchRequest> sampleReceivedRequests = <MatchRequest>[
 //
 // Two lists, one per side, the same way the request inboxes above work. Either
 // side can send a request, so each list carries both directions: a pending one
-// this side must answer, a pending one it is waiting on, two accepted threads
-// with real talking in them, and one declined with the refusal readable. A
-// student reads [sampleConversations]; a tutor reads
-// [sampleReceivedConversations].
+// this side must answer, a pending one it is waiting on, accepted threads with
+// real talking in them — the student's includes every kind of message the
+// composer can make — and one declined with the refusal readable. A student
+// reads [sampleConversations]; a tutor reads [sampleReceivedConversations].
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// A student's side. The counterpart is a tutor, `fromMe` is the student
 /// talking, and `requestedByMe` says which way the asking went — the tutor's
 /// offer at the top is the one this side has to answer.
-const List<Conversation> sampleConversations = <Conversation>[
+///
+/// Not const: the first thread carries [sampleWorksheetPhoto], bytes decoded at
+/// load. Everything else in the list still would be.
+final List<Conversation> sampleConversations = <Conversation>[
+  // The rich thread, already accepted: a photo, a voice note, a call line and
+  // a proposed session, so every bubble the composer can make is visible on
+  // the first run. It is also the one thread whose session card can be
+  // answered in the sample data.
+  Conversation(
+    id: 'c-1045',
+    counterpartId: 't-greta',
+    counterpartName: 'Greta Lindqvist',
+    counterpartRole: Role.tutor,
+    subject: 'Calculus',
+    status: RequestStatus.accepted,
+    requestedByMe: true,
+    messages: <ChatMessage>[
+      ChatMessage(
+        text: 'Question 7 is the one that keeps going wrong. The working is '
+            'fine until the last two lines and then I lose the thread.',
+        fromMe: true,
+        sentAt: '13:58',
+      ),
+      ChatMessage(
+        text: 'Photo · the marked page',
+        fromMe: false,
+        sentAt: '14:02',
+        kind: MessageKind.image,
+        image: sampleWorksheetPhoto,
+      ),
+      ChatMessage(
+        text: 'That is the line. You are dropping the constant two steps '
+            'before the mark scheme asks you to. Same mistake in parts b and c.',
+        fromMe: false,
+        sentAt: '14:03',
+      ),
+      ChatMessage(
+        text: 'That makes more sense than the mark scheme does. Thursday '
+            'evening to go through the rest of the paper?',
+        fromMe: true,
+        sentAt: '14:06',
+      ),
+      ChatMessage(
+        text: 'Voice note · 0:18',
+        fromMe: false,
+        sentAt: '14:09',
+        kind: MessageKind.voice,
+        seconds: 18,
+      ),
+      ChatMessage(
+        text: 'Voice call · 04:12',
+        fromMe: true,
+        sentAt: '14:20',
+        kind: MessageKind.call,
+      ),
+      ChatMessage(
+        id: 'm-session-c-1045',
+        text: 'Session proposed · Thu 22 Oct · 17:30',
+        fromMe: false,
+        sentAt: '14:24',
+        kind: MessageKind.session,
+        sessionWhen: 'Thu 22 Oct · 17:30',
+      ),
+    ],
+  ),
   Conversation(
     id: 'c-1042',
     counterpartId: 't-hana',

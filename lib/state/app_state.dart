@@ -10,6 +10,7 @@
 // state-management package, because the whole surface is one object.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
@@ -166,32 +167,159 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Sends [text] from this side. It lands immediately; about a second and a
-  /// half later the other side answers once — the whole of the other side's
-  /// behaviour in this prototype. It answers only if the last word is still
-  /// yours, so three quick lines earn one reply, not three.
+  /// Conversations where the scripted answer is being composed. The chat shows
+  /// three moving dots while this is true; nothing else in the app reads it.
+  final Set<String> _typing = <String>{};
+  final Map<String, Timer> _typingTimers = <String, Timer>{};
+  final Map<String, Timer> _replyTimers = <String, Timer>{};
+
+  bool isTyping(String conversationId) => _typing.contains(conversationId);
+
+  int _serial = 0;
+  String _nextMessageId() =>
+      'm-${DateTime.now().microsecondsSinceEpoch}-${_serial++}';
+
+  /// Sends [text] from this side. It lands immediately; a moment later the
+  /// other side starts typing, and about a second and a half after that they
+  /// answer once — the whole of the other side's behaviour in this prototype.
+  /// It answers only if the last word is still yours, so three quick lines earn
+  /// one reply, not three.
   void sendMessage(String id, String text) {
     final String body = text.trim();
-    final Conversation? current = conversation(id);
-    if (body.isEmpty ||
-        current == null ||
-        current.status != RequestStatus.accepted) {
-      return;
-    }
-    _appendMessage(
+    if (body.isEmpty) return;
+    _send(
       id,
       ChatMessage(
+        id: _nextMessageId(),
         text: body,
         fromMe: true,
         sentAt: clockLabel(DateTime.now()),
       ),
     );
-    Future<void>.delayed(const Duration(milliseconds: 1500), () {
-      final Conversation? latest = conversation(id);
-      if (latest == null ||
-          latest.status != RequestStatus.accepted ||
-          latest.messages.isEmpty ||
-          !latest.messages.last.fromMe) {
+  }
+
+  /// A picked picture. Bytes stay in the message, in memory, for as long as
+  /// this tab is open; nothing is encoded, uploaded or written to disk.
+  void sendImage(String id, Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    _send(
+      id,
+      ChatMessage(
+        id: _nextMessageId(),
+        text: 'Photo',
+        fromMe: true,
+        sentAt: clockLabel(DateTime.now()),
+        kind: MessageKind.image,
+        image: bytes,
+      ),
+    );
+  }
+
+  /// A simulated voice note. [seconds] is the length the bubble plays for;
+  /// there is no audio anywhere in this prototype.
+  void sendVoice(String id, int seconds) {
+    final int length = seconds < 1 ? 1 : seconds;
+    _send(
+      id,
+      ChatMessage(
+        id: _nextMessageId(),
+        text: 'Voice note · ${voiceLabel(length)}',
+        fromMe: true,
+        sentAt: clockLabel(DateTime.now()),
+        kind: MessageKind.voice,
+        seconds: length,
+      ),
+    );
+  }
+
+  /// A card, not a message: the date has already been chosen in the pickers.
+  void proposeSession(String id, DateTime at) {
+    _send(
+      id,
+      ChatMessage(
+        id: _nextMessageId(),
+        text: 'Session proposed · ${describeSession(at)}',
+        fromMe: true,
+        sentAt: clockLabel(DateTime.now()),
+        kind: MessageKind.session,
+        sessionWhen: describeSession(at),
+      ),
+    );
+  }
+
+  /// Answers a session card. Final, like the request's own answer: a second tap
+  /// cannot undo the first.
+  void answerSession(
+    String conversationId,
+    String messageId,
+    SessionState answer,
+  ) {
+    if (answer == SessionState.proposed) return;
+    for (final List<Conversation> list
+        in <List<Conversation>>[_studentChats, _tutorChats]) {
+      final int i = list.indexWhere((Conversation c) => c.id == conversationId);
+      if (i < 0) continue;
+      final Conversation c = list[i];
+      if (c.status != RequestStatus.accepted) return;
+      final int m = c.messages.indexWhere(
+        (ChatMessage message) =>
+            message.id == messageId && message.kind == MessageKind.session,
+      );
+      if (m < 0 || c.messages[m].sessionState != SessionState.proposed) return;
+      final List<ChatMessage> messages = List<ChatMessage>.of(c.messages);
+      messages[m] = messages[m].copyWith(sessionState: answer);
+      list[i] = c.copyWith(messages: messages);
+      notifyListeners();
+      return;
+    }
+  }
+
+  /// Records a call the way the thread will read it: a length when it
+  /// connected, "Missed call" when it was hung up while still ringing.
+  void logCall(
+    String id, {
+    required bool video,
+    required bool connected,
+    required Duration duration,
+  }) {
+    final Conversation? current = conversation(id);
+    if (current == null || current.status != RequestStatus.accepted) return;
+    _appendMessage(
+      id,
+      ChatMessage(
+        text: connected
+            ? '${video ? 'Video' : 'Voice'} call · ${elapsedClock(duration)}'
+            : 'Missed call',
+        fromMe: true,
+        sentAt: clockLabel(DateTime.now()),
+        kind: MessageKind.call,
+      ),
+    );
+  }
+
+  /// The one door all outgoing messages use: validate the open thread, land the
+  /// message, then schedule the scripted answer.
+  void _send(String id, ChatMessage message) {
+    final Conversation? current = conversation(id);
+    if (current == null || current.status != RequestStatus.accepted) return;
+    _appendMessage(id, message);
+    _scheduleReply(id);
+  }
+
+  void _scheduleReply(String id) {
+    _typingTimers[id]?.cancel();
+    _replyTimers[id]?.cancel();
+    if (_typing.remove(id)) notifyListeners();
+
+    _typingTimers[id] = Timer(const Duration(milliseconds: 450), () {
+      if (!_canReply(id)) return;
+      _typing.add(id);
+      notifyListeners();
+    });
+    _replyTimers[id] = Timer(const Duration(milliseconds: 1600), () {
+      final bool wasTyping = _typing.remove(id);
+      if (!_canReply(id)) {
+        if (wasTyping) notifyListeners();
         return;
       }
       _appendMessage(
@@ -203,6 +331,14 @@ class AppState extends ChangeNotifier {
         ),
       );
     });
+  }
+
+  bool _canReply(String id) {
+    final Conversation? latest = conversation(id);
+    return latest != null &&
+        latest.status == RequestStatus.accepted &&
+        latest.messages.isNotEmpty &&
+        latest.messages.last.fromMe;
   }
 
   /// The other side's entire vocabulary here: one line, sent once, after every
@@ -244,6 +380,21 @@ class AppState extends ChangeNotifier {
 
   /// Applies the adjustment the empty state suggested.
   void relaxFilters(MatchFilters relaxed) => filters = relaxed;
+
+  @override
+  void dispose() {
+    // A queued reply must not call notifyListeners on a disposed state.
+    for (final Timer timer in <Timer>[
+      ..._typingTimers.values,
+      ..._replyTimers.values,
+    ]) {
+      timer.cancel();
+    }
+    _typingTimers.clear();
+    _replyTimers.clear();
+    _typing.clear();
+    super.dispose();
+  }
 }
 
 /// Reads [AppState] from the tree and rebuilds the caller when it changes.

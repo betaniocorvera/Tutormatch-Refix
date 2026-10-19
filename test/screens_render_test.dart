@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/screens/call_screen.dart';
 import 'package:tutormatch/screens/chat_screen.dart';
 import 'package:tutormatch/screens/landing_screen.dart';
 import 'package:tutormatch/screens/login_screen.dart';
@@ -215,6 +216,109 @@ void main() {
           state: tutor, label: 'Chat, owes an answer (tutor side)');
       await render(tester, const ChatScreen(conversationId: 'c-2012'), size,
           state: tutor, label: 'Chat, waiting on their answer (tutor side)');
+      await render(tester, const ChatScreen(conversationId: 'c-2011'), size,
+          state: tutor, label: 'Chat, accepted (tutor side)');
+    });
+
+    testWidgets('the rich conversation shows every kind of message $at',
+        (WidgetTester tester) async {
+      await render(
+        tester,
+        const ChatScreen(conversationId: 'c-1045'),
+        size,
+        label: 'Chat, photo, voice, call and session',
+      );
+    });
+
+    testWidgets('the composer extras open without crowding the thread $at',
+        (WidgetTester tester) async {
+      await render(
+        tester,
+        const ChatScreen(conversationId: 'c-1045'),
+        size,
+        label: 'Chat, emoji panel',
+        act: (WidgetTester t) async {
+          // Wide has the emoji in the bar; a phone has to go through +.
+          if (find.byTooltip('More ways to send').evaluate().isNotEmpty) {
+            await t.tap(find.byTooltip('More ways to send'));
+            await t.pump(const Duration(milliseconds: 300));
+            await t.tap(find.text('Emoji'));
+          } else {
+            await t.tap(find.byTooltip('Insert an emoji'));
+          }
+          await t.pump(const Duration(milliseconds: 300));
+          expect(find.text('EMOJI'), findsOneWidget);
+        },
+      );
+    });
+
+    testWidgets('recording takes the place of the field $at',
+        (WidgetTester tester) async {
+      await render(
+        tester,
+        const ChatScreen(conversationId: 'c-1045'),
+        size,
+        label: 'Chat, recording',
+        act: (WidgetTester t) async {
+          if (find.byTooltip('More ways to send').evaluate().isNotEmpty) {
+            await t.tap(find.byTooltip('More ways to send'));
+            await t.pump(const Duration(milliseconds: 300));
+            await t.tap(find.text('Voice note'));
+          } else {
+            await t.tap(find.byTooltip('Record a voice note'));
+          }
+          await t.pump(const Duration(milliseconds: 2300));
+          expect(find.byType(TextField), findsNothing);
+          expect(find.text('Cancel'), findsOneWidget);
+          expect(find.text('00:02'), findsOneWidget);
+        },
+      );
+    });
+
+    testWidgets('a simulated voice call rings, connects and leaves a line $at',
+        (WidgetTester tester) async {
+      await render(
+        tester,
+        const CallScreen(conversationId: 'c-1045', kind: CallKind.voice),
+        size,
+        label: 'Voice call, ringing',
+      );
+
+      final AppState state = AppState();
+      await render(
+        tester,
+        const CallScreen(conversationId: 'c-1045', kind: CallKind.voice),
+        size,
+        state: state,
+        label: 'Voice call, connected',
+        act: (WidgetTester t) async {
+          await t.pump(const Duration(seconds: 3));
+          expect(find.text('Connected'), findsOneWidget);
+          await t.tap(find.byTooltip('End call'));
+          await t.pump(const Duration(milliseconds: 300));
+          expect(
+            state.conversation('c-1045')!.messages.last.text,
+            startsWith('Voice call · '),
+          );
+        },
+      );
+    });
+
+    testWidgets('a simulated video call shows the stage and the small you box $at',
+        (WidgetTester tester) async {
+      await render(
+        tester,
+        const CallScreen(conversationId: 'c-1045', kind: CallKind.video),
+        size,
+        label: 'Video call',
+        act: (WidgetTester t) async {
+          await t.pump(const Duration(seconds: 3));
+          expect(find.text('Connected'), findsOneWidget);
+          expect(find.text('You'), findsOneWidget);
+          expect(find.byTooltip('Turn the camera off'), findsOneWidget);
+          expect(find.byTooltip('Use the back camera'), findsOneWidget);
+        },
+      );
     });
 
     testWidgets('profile renders on both sides $at', (WidgetTester tester) async {

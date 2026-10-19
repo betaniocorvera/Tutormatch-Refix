@@ -27,6 +27,8 @@
 // skip onboarding. Walk the onboarding flow and the time dimension moves.
 // ═════════════════════════════════════════════════════════════════════════════
 
+import 'dart:ui' show Color;
+
 import 'package:tutormatch/theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,6 +258,15 @@ class Candidate {
     required this.fitFormat,
     required this.fitBudget,
     required this.notes,
+    this.livesIn = '',
+    this.birthdate,
+    this.statusText = '',
+    this.presence = PresenceStatus.available,
+    this.gender = '',
+    this.years,
+    this.grade = '',
+    this.goal = '',
+    this.photoTint,
   });
 
   final String id;
@@ -278,6 +289,28 @@ class Candidate {
   final List<String> credentials;
   final List<String> languages;
   final List<bool> availability;
+
+  /// The profile details. [location] says where a lesson can happen ("Online,
+  /// from Leeds"); [livesIn] is the place itself, as they would say it.
+  final String livesIn;
+  final DateTime? birthdate;
+
+  /// One short line, e.g. "Open for sessions". [presence] is the indicator.
+  final String statusText;
+  final PresenceStatus presence;
+  final String gender;
+
+  /// Tutoring experience in whole years, and the school year for a student.
+  final int? years;
+  final String grade;
+
+  /// What the viewer is aiming at. Only ever filled on the viewer's own row.
+  final String goal;
+
+  /// A flat dye standing in for a picture — the two or three sample people who
+  /// "have one". There are no photographs in this product, so the stand-in is
+  /// honest: a colour, not a stranger's face. Null means initials.
+  final Color? photoTint;
 
   // Authored agreement scores, each already capped at MatchDimension.max.
   final int fitSubjects;
@@ -316,6 +349,55 @@ extension SessionModeCopy on SessionMode {
       this == other || this == SessionMode.both || other == SessionMode.both;
 }
 
+/// Whether somebody is around right now, alongside the line they wrote about
+/// themselves. Kept as three states rather than a free colour: "around", "in
+/// the middle of something" and "not here" are all a person ever needs to read.
+enum PresenceStatus { available, busy, away }
+
+extension PresenceStatusCopy on PresenceStatus {
+  String get label => switch (this) {
+        PresenceStatus.available => 'Available',
+        PresenceStatus.busy => 'Busy',
+        PresenceStatus.away => 'Away',
+      };
+
+  StatusTone get tone => switch (this) {
+        PresenceStatus.available => StatusTone.accepted,
+        PresenceStatus.busy => StatusTone.pending,
+        PresenceStatus.away => StatusTone.neutral,
+      };
+}
+
+const List<String> _monthNames = <String>[
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+/// `14 March 2009`. Written out rather than numbered: a birthdate is read once
+/// and freehand, and `14/03/2009` is read twice and still guessed at.
+String describeDate(DateTime date) =>
+    '${date.day} ${_monthNames[date.month - 1]} ${date.year}';
+
+/// Whole years on [on]. A birthday is the fact; an age is only ever a reading
+/// of it, so it is computed rather than stored — and it stays right as the
+/// sample data ages.
+int ageOn(DateTime birthdate, DateTime on) {
+  final int years = on.year - birthdate.year;
+  final bool hadBirthday = on.month > birthdate.month ||
+      (on.month == birthdate.month && on.day >= birthdate.day);
+  return hadBirthday ? years : years - 1;
+}
+
 /// The viewer's own answers. In memory only, gone on reload. Named `Profile`
 /// and not `User` because there are no users here.
 class Profile {
@@ -328,7 +410,21 @@ class Profile {
     required this.budget,
     required this.availability,
     required this.goal,
+    this.birthdate,
+    this.livesIn = '',
+    this.statusText = '',
+    this.presence = PresenceStatus.available,
+    this.bio = '',
+    this.gender = Profile.noAnswer,
+    this.languages = const <String>[],
+    this.years,
+    this.education = '',
+    this.grade = '',
   });
+
+  /// The answer that adds no fact. A question answered "prefer not to say" is
+  /// answered, not filled — which is why the completeness count skips it.
+  static const String noAnswer = 'Prefer not to say';
 
   final Role role;
   final String name;
@@ -339,6 +435,58 @@ class Profile {
   final List<bool> availability;
   final String goal;
 
+  final DateTime? birthdate;
+
+  /// Where they live, in their own words. City, province — whatever they would
+  /// write on an envelope.
+  final String livesIn;
+
+  /// One short line, e.g. "Open for sessions". [presence] says whether now is
+  /// a good time; this says what they are up to.
+  final String statusText;
+  final PresenceStatus presence;
+  final String bio;
+  final String gender;
+  final List<String> languages;
+
+  // Tutor only. `subjects`, `mode` and `budget` above are shared: a tutor's
+  // rate is the same number a student's ceiling is, and the ranking reads it
+  // the same way.
+  final int? years;
+  final String education;
+
+  // Student only.
+  final String grade;
+
+  /// The facts a finished profile has, in the order the edit form asks for
+  /// them, each with whether it is filled. The picture is kept in [AppState]
+  /// beside the profile rather than on it, so whether one is set is passed in.
+  /// A gap is written as the thing that is missing — "a bio", not "bio".
+  List<(String, bool)> profileGaps({required bool hasPicture}) {
+    final bool student = role == Role.student;
+    return <(String, bool)>[
+      ('a picture', hasPicture),
+      ('a display name', name.trim().isNotEmpty),
+      ('a birthdate', birthdate != null),
+      ('where you live', livesIn.trim().isNotEmpty),
+      ('a status line', statusText.trim().isNotEmpty),
+      ('a bio', bio.trim().isNotEmpty),
+      ('your gender', gender != noAnswer),
+      ('the languages you speak', languages.isNotEmpty),
+      if (student) ...<(String, bool)>[
+        ('your year level', grade.trim().isNotEmpty),
+        ('what you need help with', subjects.isNotEmpty),
+        ('a budget', budget > 0),
+        ('what you are aiming at', goal.trim().isNotEmpty),
+      ] else ...<(String, bool)>[
+        ('the subjects you teach', subjects.isNotEmpty),
+        ('your hourly rate', budget > 0),
+        ('your years of experience', years != null),
+        ('your education', education.trim().isNotEmpty),
+      ],
+    ];
+  }
+
   Profile copyWith({
     Role? role,
     String? name,
@@ -348,6 +496,17 @@ class Profile {
     int? budget,
     List<bool>? availability,
     String? goal,
+    DateTime? birthdate,
+    String? livesIn,
+    String? statusText,
+    PresenceStatus? presence,
+    String? bio,
+    String? gender,
+    List<String>? languages,
+    int? years,
+    bool clearYears = false,
+    String? education,
+    String? grade,
   }) =>
       Profile(
         role: role ?? this.role,
@@ -358,6 +517,16 @@ class Profile {
         budget: budget ?? this.budget,
         availability: availability ?? this.availability,
         goal: goal ?? this.goal,
+        birthdate: birthdate ?? this.birthdate,
+        livesIn: livesIn ?? this.livesIn,
+        statusText: statusText ?? this.statusText,
+        presence: presence ?? this.presence,
+        bio: bio ?? this.bio,
+        gender: gender ?? this.gender,
+        languages: languages ?? this.languages,
+        years: clearYears ? null : (years ?? this.years),
+        education: education ?? this.education,
+        grade: grade ?? this.grade,
       );
 }
 
@@ -863,6 +1032,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 46,
     location: 'Online, from Manchester',
+    livesIn: 'Manchester',
+    birthdate: DateTime(1991, 6, 2),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    years: 9,
     rating: 4.9,
     reviews: 128,
     bio: 'I mark the papers your students are about to sit. After nine years of '
@@ -910,6 +1084,12 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.both,
     rate: 49,
     location: 'Riverside, and online',
+    livesIn: 'Riverside, Cardiff',
+    birthdate: DateTime(1988, 1, 19),
+    statusText: 'Evenings mostly full',
+    presence: PresenceStatus.busy,
+    years: 8,
+    photoTint: AppColors.avatarPlum,
     rating: 4.9,
     reviews: 74,
     bio: 'I coached the regional olympiad squad for four years. My first lesson '
@@ -951,6 +1131,12 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 52,
     location: 'Online, from Leeds',
+    livesIn: 'Leeds, West Yorkshire',
+    birthdate: DateTime(1990, 9, 8),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    years: 7,
+    photoTint: AppColors.avatarSlate,
     rating: 4.9,
     reviews: 96,
     bio: 'Students arrive with a formula sheet and no idea where the formulas '
@@ -992,6 +1178,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 58,
     location: 'Online, from Edinburgh',
+    livesIn: 'Edinburgh, Scotland',
+    birthdate: DateTime(1987, 11, 30),
+    statusText: 'Evenings and weekends',
+    presence: PresenceStatus.available,
+    years: 6,
     rating: 5.0,
     reviews: 61,
     bio: 'We pick a dataset in week one — football results, your own sleep '
@@ -1033,6 +1224,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.both,
     rate: 40,
     location: 'Fitzroy, and online',
+    livesIn: 'Fitzroy, Melbourne',
+    birthdate: DateTime(1986, 4, 12),
+    statusText: 'SAT season is open',
+    presence: PresenceStatus.available,
+    years: 7,
     rating: 4.7,
     reviews: 143,
     bio: 'Every wrong answer gets written into a log with the reason it went '
@@ -1074,6 +1270,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 28,
     location: 'Online, from Porto',
+    livesIn: 'Porto, Portugal',
+    birthdate: DateTime(1998, 2, 27),
+    statusText: 'Away until the 20th — exam marking',
+    presence: PresenceStatus.away,
+    years: 4,
     rating: 4.6,
     reviews: 52,
     bio: 'We talk for fifty minutes and I correct afterwards, in a list. Grammar '
@@ -1116,6 +1317,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.both,
     rate: 38,
     location: 'Camden, and online',
+    livesIn: 'Camden, London',
+    birthdate: DateTime(1984, 7, 4),
+    statusText: 'Weekday afternoons free',
+    presence: PresenceStatus.busy,
+    years: 12,
     rating: 4.8,
     reviews: 87,
     bio: 'Most of the students I see were marked down somewhere in year 8 and '
@@ -1156,6 +1362,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.both,
     rate: 44,
     location: 'Hackney, and online',
+    livesIn: 'Hackney, London',
+    birthdate: DateTime(1995, 5, 16),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    years: 5,
     rating: 4.8,
     reviews: 102,
     bio: 'The required practicals are where most marks quietly disappear. I '
@@ -1197,6 +1408,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.inPerson,
     rate: 34,
     location: 'Islington, in person only',
+    livesIn: 'Islington, London',
+    birthdate: DateTime(1979, 10, 1),
+    statusText: 'Full until the new year',
+    presence: PresenceStatus.busy,
+    years: 14,
     rating: 4.7,
     reviews: 68,
     bio: 'You send me the draft. I mark it the way the exam board would, then we '
@@ -1237,6 +1453,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 30,
     location: 'Online, from Bristol',
+    livesIn: 'Bristol',
+    birthdate: DateTime(2000, 8, 21),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    years: 2,
     rating: 4.5,
     reviews: 29,
     bio: 'Three years in, still cheap while I build up reviews. I teach the '
@@ -1278,6 +1499,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 36,
     location: 'Online, from Birmingham',
+    livesIn: 'Birmingham, West Midlands',
+    birthdate: DateTime(1993, 12, 5),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    years: 6,
     rating: 4.8,
     reviews: 54,
     bio: 'Nine times out of ten the problem is not the writing, it is that the '
@@ -1319,6 +1545,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.inPerson,
     rate: 42,
     location: 'Sheffield, in person only',
+    livesIn: 'Sheffield, South Yorkshire',
+    birthdate: DateTime(1985, 3, 23),
+    statusText: 'One slot left on Wednesdays',
+    presence: PresenceStatus.busy,
+    years: 10,
     rating: 4.8,
     reviews: 45,
     bio: 'We draw everything before we write anything. It is slower for a term, '
@@ -1359,6 +1590,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 55,
     location: 'Online, from Paris',
+    livesIn: 'Paris, France',
+    birthdate: DateTime(1996, 6, 11),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    years: 5,
     rating: 4.9,
     reviews: 71,
     bio: 'You will write more code than you expect in the first hour. We only '
@@ -1399,6 +1635,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.inPerson,
     rate: 32,
     location: 'Bath, in person only',
+    livesIn: 'Bath, Somerset',
+    birthdate: DateTime(1972, 1, 29),
+    statusText: 'Studio slots on Saturdays',
+    presence: PresenceStatus.available,
+    years: 20,
     rating: 4.9,
     reviews: 158,
     bio: 'Fifteen years of grade-exam preparation. My students hear the cadence '
@@ -1439,6 +1680,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.online,
     rate: 33,
     location: 'Online, from Lyon',
+    livesIn: 'Lyon, France',
+    birthdate: DateTime(1990, 4, 3),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    years: 9,
     rating: 4.7,
     reviews: 39,
     bio: 'I will not give you a summary of the book. I will ask you questions '
@@ -1479,6 +1725,11 @@ final List<Candidate> sampleTutors = <Candidate>[
     mode: SessionMode.inPerson,
     rate: 31,
     location: 'Oxford, in person only',
+    livesIn: 'Oxford, Oxfordshire',
+    birthdate: DateTime(1992, 9, 17),
+    statusText: 'Evenings only this term',
+    presence: PresenceStatus.busy,
+    years: 7,
     rating: 4.6,
     reviews: 33,
     bio: 'We read what was actually written at the time, badly translated and '
@@ -1523,6 +1774,11 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.both,
     rate: 45,
     location: 'Highbury, will travel 3 km',
+    livesIn: 'Highbury, London',
+    birthdate: DateTime(2009, 3, 14),
+    statusText: 'Mocks in eleven weeks',
+    presence: PresenceStatus.available,
+    grade: 'Year 12',
     rating: 4.9,
     reviews: 3,
     bio: 'I am fine in class and then I freeze on the harder questions in the '
@@ -1564,6 +1820,12 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.online,
     rate: 50,
     location: 'Online only, two hours ahead of you',
+    livesIn: 'Cairo, Egypt',
+    birthdate: DateTime(2008, 7, 8),
+    statusText: 'Revision until exams',
+    presence: PresenceStatus.busy,
+    grade: 'Year 13',
+    photoTint: AppColors.avatarClay,
     rating: 4.9,
     reviews: 4,
     bio: 'Grade 8 predicted, need a 9 for the course I want. I do not need '
@@ -1604,6 +1866,11 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.online,
     rate: 60,
     location: 'Online only',
+    livesIn: 'Nottingham',
+    birthdate: DateTime(2008, 2, 14),
+    statusText: 'Open for sessions',
+    presence: PresenceStatus.available,
+    grade: 'Year 13',
     rating: 4.8,
     reviews: 5,
     bio: 'I want to understand where the results come from rather than memorise '
@@ -1645,6 +1912,11 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.online,
     rate: 60,
     location: 'Online only, one hour ahead of you',
+    livesIn: 'Rotterdam, Netherlands',
+    birthdate: DateTime(2009, 10, 6),
+    statusText: 'Project work through the winter',
+    presence: PresenceStatus.available,
+    grade: 'Year 12',
     rating: 4.7,
     reviews: 6,
     bio: 'I have three years of cycling data and a half-finished analysis. I '
@@ -1686,6 +1958,11 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.online,
     rate: 35,
     location: 'Online only',
+    livesIn: 'Manchester',
+    birthdate: DateTime(2010, 5, 19),
+    statusText: 'Weeknights after six',
+    presence: PresenceStatus.available,
+    grade: 'Year 11',
     rating: 4.6,
     reviews: 2,
     bio: 'I am on a grade 5 in both and I need a 6 to take either at A-level. '
@@ -1726,6 +2003,11 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.online,
     rate: 40,
     location: 'Online only',
+    livesIn: 'Brighton',
+    birthdate: DateTime(2009, 8, 2),
+    statusText: 'Coursework deadlines this half term',
+    presence: PresenceStatus.busy,
+    grade: 'Year 12',
     rating: 4.6,
     reviews: 3,
     bio: 'My ideas are fine and my structure is not. I need someone to read a '
@@ -1766,6 +2048,11 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.inPerson,
     rate: 40,
     location: 'Camden, in person only',
+    livesIn: 'Camden, London',
+    birthdate: DateTime(2010, 11, 25),
+    statusText: 'Afternoons only, with support',
+    presence: PresenceStatus.available,
+    grade: 'Year 10',
     rating: 4.5,
     reviews: 2,
     bio: 'I lost the plot somewhere in year 8 and nobody noticed. I would rather '
@@ -1806,6 +2093,11 @@ final List<Candidate> sampleStudents = <Candidate>[
     mode: SessionMode.inPerson,
     rate: 30,
     location: 'Bath, in person only',
+    livesIn: 'Bath, Somerset',
+    birthdate: DateTime(2010, 6, 30),
+    statusText: 'Back in two weeks',
+    presence: PresenceStatus.away,
+    grade: 'Year 10',
     rating: 4.4,
     reviews: 1,
     bio: 'Languages are the only lessons I look forward to. I want to actually '
@@ -1889,6 +2181,33 @@ abstract final class OnboardingOptions {
     'Work with beginners who need foundations rebuilt',
     'Teach the hardest material to students who want it',
     'Build up reviews and a regular timetable',
+  ];
+
+  /// The languages the sample people actually speak, plus the usual suspects —
+  /// so a picked set in the edit form always has somewhere to come back from.
+  static const List<String> languages = <String>[
+    'English',
+    'Arabic',
+    'Bengali',
+    'French',
+    'German',
+    'Igbo',
+    'Italian',
+    'Japanese',
+    'Mandarin',
+    'Polish',
+    'Portuguese',
+    'Spanish',
+    'Swedish',
+    'Tamil',
+    'Twi',
+  ];
+
+  static const List<String> genders = <String>[
+    'Female',
+    'Male',
+    'Non-binary',
+    Profile.noAnswer,
   ];
 }
 
@@ -2345,6 +2664,11 @@ const List<Conversation> sampleReceivedConversations = <Conversation>[
 /// The student you are if you open the app and skip the form. Chosen so the
 /// default list has a clear top, a muddle in the middle and some honest bad
 /// matches at the bottom — a real ranking, not a wall of 99s.
+///
+/// The details below are the ones an edit form can change: birthdate, where
+/// they live, a status line, their year. The bio is deliberately empty, so the
+/// completeness meter has something to count and the preview has something to
+/// gain from being filled in.
 final Profile demoStudentProfile = Profile(
   role: Role.student,
   name: 'Maya Chen',
@@ -2354,6 +2678,13 @@ final Profile demoStudentProfile = Profile(
   budget: 50,
   availability: avail(const <String>['Mon-Eve', 'Tue-Eve', 'Wed-Eve', 'Thu-Eve', 'Sat-Morn']),
   goal: OnboardingOptions.studentGoals[1],
+  birthdate: DateTime(2009, 3, 14),
+  livesIn: 'Highbury, London',
+  statusText: 'Mocks in eleven weeks',
+  presence: PresenceStatus.available,
+  gender: 'Female',
+  languages: const <String>['English', 'Mandarin'],
+  grade: 'Year 12',
 );
 
 /// The tutor you are if you open the app and skip the form. Calibrated against
@@ -2367,7 +2698,67 @@ final Profile demoTutorProfile = Profile(
   budget: 46,
   availability: avail(const <String>['Mon-Eve', 'Tue-Eve', 'Thu-Eve', 'Sat-Morn']),
   goal: OnboardingOptions.tutorGoals[0],
+  birthdate: DateTime(1991, 6, 2),
+  livesIn: 'Manchester',
+  statusText: 'Open for sessions',
+  presence: PresenceStatus.available,
+  gender: 'Female',
+  languages: const <String>['English', 'Igbo'],
+  years: 9,
+  education: 'MSc Mathematics, Manchester',
 );
+
+/// The pool row for [id], on either side. Screens that hold only an id — a
+/// conversation, a request — look the person up here, so an avatar is drawn
+/// from one place whatever the screen knows.
+Candidate? candidateById(String id) {
+  for (final List<Candidate> pool in <List<Candidate>>[sampleTutors, sampleStudents]) {
+    for (final Candidate c in pool) {
+      if (c.id == id) return c;
+    }
+  }
+  return null;
+}
+
+/// The viewer's own profile, shaped as a pool row, so the person page can draw
+/// it with the very same widgets it draws everybody else with — which is what
+/// makes "preview how others see you" exact rather than a paraphrase. Nothing
+/// here is a match: the fit numbers are zero and the notes are empty, because
+/// no comparison produced them.
+Candidate profileAsCandidate(Profile p) => Candidate(
+      id: 'me',
+      role: p.role,
+      name: p.name,
+      headline: '',
+      subjects: p.subjects,
+      styleLabel: p.style,
+      styleTags: const <String>[],
+      mode: p.mode,
+      rate: p.budget,
+      location: p.livesIn,
+      livesIn: p.livesIn,
+      birthdate: p.birthdate,
+      statusText: p.statusText,
+      presence: p.presence,
+      gender: p.gender,
+      years: p.years,
+      grade: p.grade,
+      goal: p.goal,
+      rating: 0,
+      reviews: 0,
+      bio: p.bio,
+      credentials: p.role == Role.tutor && p.education.trim().isNotEmpty
+          ? <String>[p.education]
+          : const <String>[],
+      languages: p.languages,
+      availability: p.availability,
+      fitSubjects: 0,
+      fitStyle: 0,
+      fitFormat: 0,
+      fitBudget: 0,
+      notes: const <FitNote>[],
+    );
+
 
 /// The specimen shown on the landing page: the top-ranked tutor for the demo
 /// student, scored live so the landing page cannot drift from the product.

@@ -24,6 +24,7 @@ import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/availability_grid.dart';
 import 'package:tutormatch/widgets/match_score_scale.dart';
+import 'package:tutormatch/widgets/person_profile.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
 import 'package:tutormatch/widgets/tm_field.dart';
 import 'package:tutormatch/widgets/tm_icon.dart';
@@ -122,23 +123,10 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     final Widget person = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(c.name, style: AppType.pageTitle),
-        const SizedBox(height: Space.sm),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Text(c.headline, style: AppType.bodyLarge.quiet),
-        ),
-        const SizedBox(height: Space.lg),
-        _FactLine(candidate: c),
-        const SizedBox(height: Space.xxl),
-        const TMRule(label: 'In their own words'),
-        const SizedBox(height: Space.lg),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Text('“${c.bio}”', style: AppType.quote),
-        ),
-        const SizedBox(height: Space.xxl),
-        _Credentials(candidate: c),
+        // The person block is shared with the profile preview, so the page a
+        // tutor opens for a student and the page a student previews are the
+        // same page — fields and all — rather than two drawings of one idea.
+        PersonSummary(person: c),
         const SizedBox(height: Space.xxl),
         const TMRule(label: 'Why you matched'),
         const SizedBox(height: Space.lg),
@@ -253,98 +241,6 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Pieces
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _FactLine extends StatelessWidget {
-  const _FactLine({required this.candidate});
-  final Candidate candidate;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: Space.sm,
-      runSpacing: Space.sm,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        Text(
-          candidate.role == Role.tutor ? 'Tutor' : 'Student',
-          style: AppType.bodySmall.tone(AppColors.inkMuted),
-        ),
-        Text('·', style: AppType.bodySmall.quieter),
-        for (final String subject in candidate.subjects)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.xs + 1),
-            decoration: BoxDecoration(
-              border: Border.all(color: AppColors.ruleStrong),
-              borderRadius: BorderRadius.circular(Radii.sharp - 1),
-            ),
-            child: Text(subject, style: AppType.bodySmall.tone(AppColors.inkSecondary)),
-          ),
-        Text('·', style: AppType.bodySmall.quieter),
-        Text(candidate.modeCopy, style: AppType.bodySmall.quieter),
-        Text('·', style: AppType.bodySmall.quieter),
-        Text(candidate.rateCopy, style: AppType.figure),
-        Text('·', style: AppType.bodySmall.quieter),
-        Text(candidate.location, style: AppType.bodySmall.quieter),
-      ],
-    );
-  }
-}
-
-class _Credentials extends StatelessWidget {
-  const _Credentials({required this.candidate});
-  final Candidate candidate;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: Space.xxxl,
-      runSpacing: Space.xl,
-      children: <Widget>[
-        _Column(
-          label: candidate.role == Role.tutor ? 'Works this way' : 'Wants this',
-          value: '${candidate.styleLabel}\n${candidate.styleTags.join(' · ')}',
-        ),
-        _Column(
-          label: candidate.role == Role.tutor ? 'Background' : 'Where they are',
-          value: candidate.credentials.join('\n'),
-        ),
-        _Column(
-          label: 'Speaks',
-          value: candidate.languages.join(' · '),
-        ),
-        _Column(
-          label: 'Reviews',
-          value: candidate.reviews > 0
-              ? '${candidate.rating} from ${candidate.reviews}'
-              : 'No reviews yet — newer to the platform',
-        ),
-      ],
-    );
-  }
-}
-
-class _Column extends StatelessWidget {
-  const _Column({required this.label, required this.value});
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 180,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const SizedBox(height: 1, child: ColoredBox(color: AppColors.rule)),
-          const SizedBox(height: Space.md),
-          TMMicroLabelText(label),
-          const SizedBox(height: Space.sm),
-          Text(value, style: AppType.bodySmall.tone(AppColors.inkSecondary)),
-        ],
-      ),
-    );
-  }
-}
 
 class _Reason extends StatelessWidget {
   const _Reason({required this.index, required this.note});

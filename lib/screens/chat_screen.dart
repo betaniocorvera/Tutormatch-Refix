@@ -148,7 +148,13 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: EdgeInsets.only(
               bottom: i == c.messages.length - 1 ? 0 : Space.lg,
             ),
-            child: _Bubble(message: c.messages[i], name: c.counterpartName),
+            child: _Bubble(
+              message: c.messages[i],
+              name: c.counterpartName,
+              // Whoever the conversation is with, their avatar is drawn from
+              // the one pool row that knows what they look like.
+              tint: candidateById(c.counterpartId)?.photoTint,
+            ),
           ),
         ),
       ),
@@ -262,7 +268,11 @@ class _ChatHeader extends StatelessWidget {
               children: <Widget>[
                 _BackButton(onTap: onBack),
                 const SizedBox(width: Space.sm),
-                TMAvatar(c.counterpartName, size: 40),
+                TMAvatar(
+                  c.counterpartName,
+                  size: 40,
+                  tint: candidateById(c.counterpartId)?.photoTint,
+                ),
                 const SizedBox(width: Space.md),
                 Expanded(
                   child: Column(
@@ -333,10 +343,13 @@ class _BackButton extends StatelessWidget {
 /// One message and its time. Mine on the accent at the right; theirs on
 /// sunken paper at the left, with the avatar that says who is talking.
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, required this.name});
+  const _Bubble({required this.message, required this.name, this.tint});
 
   final ChatMessage message;
   final String name;
+
+  /// The counterpart's stand-in for a picture, when they have one.
+  final Color? tint;
 
   @override
   Widget build(BuildContext context) {
@@ -387,7 +400,7 @@ class _Bubble extends StatelessWidget {
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.only(top: Space.xs),
-          child: TMAvatar(name, size: 28),
+          child: TMAvatar(name, size: 28, tint: tint),
         ),
         const SizedBox(width: Space.sm),
         Flexible(

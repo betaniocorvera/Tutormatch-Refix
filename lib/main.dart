@@ -19,6 +19,7 @@ import 'package:tutormatch/screens/match_detail_screen.dart';
 import 'package:tutormatch/screens/matches_screen.dart';
 import 'package:tutormatch/screens/messages_screen.dart';
 import 'package:tutormatch/screens/onboarding_screen.dart';
+import 'package:tutormatch/screens/profile_preview_screen.dart';
 import 'package:tutormatch/screens/profile_screen.dart';
 import 'package:tutormatch/screens/register_screen.dart';
 import 'package:tutormatch/screens/requests_screen.dart';
@@ -40,6 +41,7 @@ abstract final class Routes {
   static const String messages = '/messages';
   static const String chat = '/chat';
   static const String profile = '/profile';
+  static const String profilePreview = '/profile/preview';
 }
 
 class TutorMatchApp extends StatefulWidget {
@@ -110,6 +112,8 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
         return build(const MessagesScreen());
       case Routes.profile:
         return build(const ProfileScreen());
+      case Routes.profilePreview:
+        return build(const ProfilePreviewScreen());
       case Routes.landing:
       default:
         return build(const LandingScreen());

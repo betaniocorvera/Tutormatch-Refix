@@ -17,6 +17,8 @@
 // comfortable.)
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,11 +30,18 @@ import 'package:tutormatch/screens/match_detail_screen.dart';
 import 'package:tutormatch/screens/matches_screen.dart';
 import 'package:tutormatch/screens/messages_screen.dart';
 import 'package:tutormatch/screens/onboarding_screen.dart';
+import 'package:tutormatch/screens/profile_preview_screen.dart';
 import 'package:tutormatch/screens/profile_screen.dart';
 import 'package:tutormatch/screens/register_screen.dart';
 import 'package:tutormatch/screens/requests_screen.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+
+/// A valid, opaque 1×1 red PNG: what the picker would hand to app state.
+final Uint8List _redDot = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ'
+  '/pLvAAAAAElFTkSuQmCC',
+);
 
 const List<Size> _sizes = <Size>[
   Size(360, 780), // the narrow phone the week grid has to survive
@@ -59,6 +68,7 @@ void main() {
     Size size, {
     AppState? state,
     String? label,
+    Future<void> Function(WidgetTester tester)? act,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -81,6 +91,9 @@ void main() {
       // Long enough for the ranking pass on the matches screen and for every
       // short state transition to have finished.
       await tester.pump(const Duration(milliseconds: 1200));
+      if (act != null) {
+        await act(tester);
+      }
     } finally {
       FlutterError.onError = previous;
     }
@@ -209,6 +222,62 @@ void main() {
       final AppState tutor = AppState()..role = Role.tutor;
       await render(tester, const ProfileScreen(), size,
           state: tutor, label: 'Profile (tutor)');
+    });
+
+    testWidgets('the profile in edit mode renders $at', (WidgetTester tester) async {
+      await render(
+        tester,
+        const ProfileScreen(),
+        size,
+        label: 'Profile, editing',
+        act: (WidgetTester t) async {
+          // The button can sit just under the fold on a small phone; bring it
+          // into view before tapping, then prove the form actually opened so
+          // this test cannot quietly measure the read-only screen twice.
+          await t.ensureVisible(find.text('Edit profile'));
+          await t.pump(const Duration(milliseconds: 400));
+          await t.tap(find.text('Edit profile'));
+          await t.pump();
+          await t.pump(const Duration(milliseconds: 400));
+          expect(find.text('Save changes'), findsWidgets);
+        },
+      );
+    });
+
+    testWidgets('the preview of your own profile renders on both sides $at',
+        (WidgetTester tester) async {
+      await render(tester, const ProfilePreviewScreen(), size,
+          label: 'Profile preview (student)');
+
+      final AppState tutor = AppState()
+        ..role = Role.tutor
+        ..profile = demoTutorProfile;
+      await render(tester, const ProfilePreviewScreen(), size,
+          state: tutor, label: 'Profile preview (tutor)');
+
+      // With a picture set, the avatar is an image rather than initials. The
+      // bytes are never decoded in a test frame, so this is a layout check on
+      // the same box, not a pixel check.
+      final AppState pictured = AppState()..photo = _redDot;
+      await render(tester, const ProfilePreviewScreen(), size,
+          state: pictured, label: 'Profile preview with a picture');
+    });
+
+    testWidgets('the picture sheet renders $at', (WidgetTester tester) async {
+      await render(
+        tester,
+        const ProfileScreen(),
+        size,
+        label: 'Picture sheet',
+        act: (WidgetTester t) async {
+          await t.ensureVisible(find.text('Add a picture'));
+          await t.pump(const Duration(milliseconds: 400));
+          await t.tap(find.text('Add a picture'));
+          await t.pump();
+          await t.pump(const Duration(milliseconds: 400));
+          expect(find.text('Choose a picture'), findsOneWidget);
+        },
+      );
     });
   }
 }

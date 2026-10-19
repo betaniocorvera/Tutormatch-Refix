@@ -30,6 +30,7 @@ import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/availability_grid.dart';
 import 'package:tutormatch/widgets/match_score_scale.dart';
+import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
 import 'package:tutormatch/widgets/tm_icon.dart';
 import 'package:tutormatch/widgets/tm_layout.dart';
@@ -84,11 +85,25 @@ class MatchResultCard extends StatelessWidget {
           profileSummary: profileSummary,
         ),
         SizedBox(height: lead ? Space.lg : Space.md),
-        Text(c.name, style: lead ? AppType.titleLarge : AppType.name),
-        const SizedBox(height: Space.xs + 2),
-        SizedBox(
-          width: 460,
-          child: Text(c.headline, style: AppType.body.quiet),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            TMAvatar(c.name, size: lead ? 56 : 44, tint: c.photoTint),
+            const SizedBox(width: Space.lg),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(c.name, style: lead ? AppType.titleLarge : AppType.name),
+                  const SizedBox(height: Space.xs + 2),
+                  SizedBox(
+                    width: 460,
+                    child: Text(c.headline, style: AppType.body.quiet),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: Space.lg),
         _Facts(candidate: c),

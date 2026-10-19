@@ -10,13 +10,17 @@
 // state-management package, because the whole surface is one object.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 
 class AppState extends ChangeNotifier {
-  /// Which side of the marketplace you are standing on. Set by register, login
-  /// and onboarding; it decides whose list you see, never who you are.
+  /// Which side of the marketplace you are standing on. Set once, by register,
+  /// login or onboarding, and never switched from inside the app: the account
+  /// type chosen when you signed up is the account type. It decides whose list
+  /// you see, never who you are.
   Role _role = Role.student;
   Role get role => _role;
   set role(Role value) {
@@ -29,6 +33,19 @@ class AppState extends ChangeNotifier {
   Profile get profile => _profile;
   set profile(Profile value) {
     _profile = value;
+    notifyListeners();
+  }
+
+  /// The viewer's own picture, in memory only: bytes, not a path and not a URL,
+  /// because there is no filesystem and no server behind this prototype. Every
+  /// avatar of the viewer reads it from here, so one pick lands in the profile
+  /// header and in the preview at the same moment — and removing it puts the
+  /// initials back everywhere at once.
+  Uint8List? _photo;
+  Uint8List? get photo => _photo;
+  set photo(Uint8List? value) {
+    if (identical(value, _photo)) return;
+    _photo = value;
     notifyListeners();
   }
 
@@ -80,8 +97,9 @@ class AppState extends ChangeNotifier {
   List<Conversation> get conversations =>
       _role == Role.student ? _studentChats : _tutorChats;
 
-  /// The conversation with [id], whichever side it belongs to. The screen that
-  /// is open must keep working if the role is switched underneath it.
+  /// The conversation with [id], whichever side it belongs to. A chat screen
+  /// that stays open keeps working without needing to know which list it was
+  /// opened from.
   Conversation? conversation(String id) {
     for (final List<Conversation> list
         in <List<Conversation>>[_studentChats, _tutorChats]) {

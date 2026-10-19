@@ -76,6 +76,15 @@ abstract final class AppColors {
   static const Color declined = Color(0xFF6E6455); // = inkMuted, on purpose
   static const Color declinedWash = Color(0xFFE9E3D6);
 
+  // Identity fills for the three sample people who have "a picture". Not a
+  // status: these never mean accepted, pending or refused, and they are not
+  // the accent — they are flat dyes, the honest stand-in for a photograph this
+  // product deliberately does not use. Initials sit on them in [onAccent],
+  // and each one clears 6:1 against it.
+  static const Color avatarSlate = Color(0xFF3F5568);
+  static const Color avatarPlum = Color(0xFF5B3E56);
+  static const Color avatarClay = Color(0xFF8A5137);
+
   // Focus. Ink, not accent, so focus is unambiguous: it is the only 2px ring
   // in the system and it never competes with selection for meaning.
   static const Color focusRing = Color(0xFF17130E);

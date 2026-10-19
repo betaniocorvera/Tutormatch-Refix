@@ -15,6 +15,7 @@ import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
 import 'package:tutormatch/widgets/tm_empty_state.dart';
 import 'package:tutormatch/widgets/tm_icon.dart';
@@ -329,34 +330,30 @@ class _RequestEntry extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              TMAvatar(
+                request.counterpartName,
+                size: 44,
+                tint: candidateById(request.counterpartId)?.photoTint,
+              ),
+              const SizedBox(width: Space.lg),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: <Widget>[
-                        Flexible(
-                          child: Text(request.counterpartName, style: AppType.name),
-                        ),
-                        const SizedBox(width: Space.sm),
-                        Flexible(
-                          child: Text(
-                            '· ${request.id}',
-                            style: AppType.micro.tone(AppColors.inkMuted),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
+                    Text(request.counterpartName, style: AppType.name),
                     const SizedBox(height: Space.sm),
                     Wrap(
                       spacing: Space.md,
                       runSpacing: Space.xs,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
+                        // The reference belongs with the other facts about the
+                        // request, not with the name: on a phone it was the
+                        // thing that pushed a two-word name onto two lines.
+                        Text(
+                          request.id,
+                          style: AppType.micro.tone(AppColors.inkMuted),
+                        ),
                         Text(request.subject, style: AppType.bodySmall.tone(AppColors.inkSecondary)),
                         Text('matched ${request.score}/100', style: AppType.figure.tone(AppColors.inkMuted)),
                         Text(request.sentOn, style: AppType.bodySmall.quieter),

@@ -174,7 +174,11 @@ class _ConversationEntry extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              TMAvatar(c.counterpartName, size: 44),
+              TMAvatar(
+                c.counterpartName,
+                size: 44,
+                tint: candidateById(c.counterpartId)?.photoTint,
+              ),
               const SizedBox(width: Space.lg),
               Expanded(
                 child: Column(

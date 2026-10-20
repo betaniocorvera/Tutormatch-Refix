@@ -17,6 +17,7 @@ import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/screens/profile_screen.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+import 'package:tutormatch/widgets/location_map.dart';
 import 'package:tutormatch/widgets/tm_field.dart';
 
 /// A valid, opaque 1×1 red PNG: a picture picked from a device, in miniature.
@@ -29,6 +30,8 @@ final Uint8List _redDot = base64Decode(
 
 void main() {
   setUpAll(_loadBundledFonts);
+  setUp(() => debugLoadMapTiles = false);
+  tearDown(() => debugLoadMapTiles = true);
 
   /// Two frames: the first starts an animation or a route, the second finishes
   /// it. One pump of a long duration only gets as far as the first frame.
@@ -72,12 +75,29 @@ void main() {
   Finder field(String label) =>
       find.ancestor(of: find.text(label), matching: find.byType(TMTextField));
 
+  /// Opens one of the place dropdowns and chooses [option]. The dropdowns are
+  /// keyed because their labels are shared with other copy on the page.
+  Future<void> choose(WidgetTester tester, String key, String option) async {
+    await tester.tap(find.byKey(Key(key)));
+    await settle(tester);
+    await tester.tap(find.text(option).last);
+    await settle(tester);
+  }
+
   testWidgets('Save writes the draft and says so', (WidgetTester tester) async {
     final AppState state = await open(tester);
     await tapLabel(tester, 'Edit profile');
 
     await tester.enterText(field('Display name'), 'Maya C.');
-    await tester.enterText(field('Lives in'), 'Finsbury Park, London');
+    await choose(tester, 'place-area', 'Hackney');
+
+    // The preview centres on the chosen neighbourhood before Save.
+    final LocationMap preview = tester.widget<LocationMap>(
+      find.byType(LocationMap),
+    );
+    expect(preview.centerLatitude, closeTo(51.5450, 0.0001));
+    expect(preview.centerLongitude, closeTo(-0.0553, 0.0001));
+
     await tester.enterText(
       field('Bio'),
       'Worked examples first, then I do the next one on my own.',
@@ -88,7 +108,8 @@ void main() {
     await tapLabel(tester, 'Save changes');
 
     expect(state.profile.name, 'Maya C.');
-    expect(state.profile.livesIn, 'Finsbury Park, London');
+    expect(state.profile.placeId, 'london-hackney');
+    expect(state.profile.livesIn, 'Hackney, London');
     expect(
       state.profile.bio,
       'Worked examples first, then I do the next one on my own.',
@@ -96,10 +117,85 @@ void main() {
     expect(find.text('Profile updated'), findsOneWidget);
     // Back to reading: the form's labels are gone.
     expect(find.text('Display name'), findsNothing);
+
+    // The saved map obeys the privacy setting: the chosen area is Hackney,
+    // but the public map is centred on London and labelled with the city.
+    final LocationMap saved = tester.widget<LocationMap>(
+      find.byType(LocationMap),
+    );
+    expect(saved.centerLatitude, closeTo(51.5072, 0.0001));
+    expect(saved.centerLongitude, closeTo(-0.1276, 0.0001));
   });
 
-  testWidgets('Cancel leaves the profile exactly as it was',
-      (WidgetTester tester) async {
+  testWidgets('hiding the location removes the public map and area text', (
+    WidgetTester tester,
+  ) async {
+    final AppState state = await open(tester);
+    await tapLabel(tester, 'Edit profile');
+
+    await tapLabel(tester, 'Hide my location');
+    await tapLabel(tester, 'Save changes');
+
+    expect(state.profile.locationPrivacy, LocationPrivacy.hidden);
+    // The area is still saved for the owner's own editing, but nothing public
+    // renders it: no map section, no Lives in row, no identity meta.
+    expect(state.profile.placeId, 'london-highbury');
+    expect(find.text('Approximate area'), findsNothing);
+    expect(find.text('Lives in'), findsNothing);
+    expect(find.text('Highbury, London'), findsNothing);
+  });
+
+  testWidgets('a profile with no area still opens the map preview', (
+    WidgetTester tester,
+  ) async {
+    final AppState state = AppState();
+    state.profile = state.profile.copyWith(placeId: '', livesIn: '');
+    await open(tester, state: state);
+    await tapLabel(tester, 'Edit profile');
+
+    // The dropdowns have no selection yet, but the preview is still a map:
+    // centred on the catalogue's default place and captioned as a prompt.
+    final LocationMap preview = tester.widget<LocationMap>(
+      find.byType(LocationMap),
+    );
+    expect(
+      preview.centerLatitude,
+      closeTo(samplePlaces.first.latitude, 0.0001),
+    );
+    expect(
+      preview.centerLongitude,
+      closeTo(samplePlaces.first.longitude, 0.0001),
+    );
+    expect(find.text('Choose your area'), findsOneWidget);
+    expect(
+      find.textContaining('Choose a region, city and area'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('privacy never removes the owner\'s edit map', (
+    WidgetTester tester,
+  ) async {
+    final AppState state = AppState();
+    state.profile = demoStudentProfile.copyWith(
+      locationPrivacy: LocationPrivacy.hidden,
+    );
+    await open(tester, state: state);
+    await tapLabel(tester, 'Edit profile');
+
+    // "Hidden" is about what other people see. The owner still gets the map
+    // preview while editing, centred on the area they saved.
+    final LocationMap preview = tester.widget<LocationMap>(
+      find.byType(LocationMap),
+    );
+    expect(preview.centerLatitude, closeTo(51.5520, 0.0001));
+    expect(preview.centerLongitude, closeTo(-0.0970, 0.0001));
+    expect(find.text('Highbury, London'), findsWidgets);
+  });
+
+  testWidgets('Cancel leaves the profile exactly as it was', (
+    WidgetTester tester,
+  ) async {
     final AppState state = await open(tester);
     final String before = state.profile.name;
 
@@ -113,8 +209,9 @@ void main() {
     expect(find.text('Display name'), findsNothing);
   });
 
-  testWidgets('an empty display name is refused, and says why',
-      (WidgetTester tester) async {
+  testWidgets('an empty display name is refused, and says why', (
+    WidgetTester tester,
+  ) async {
     final AppState state = await open(tester);
     await tapLabel(tester, 'Edit profile');
 
@@ -128,28 +225,31 @@ void main() {
     expect(find.text('Display name'), findsOneWidget);
   });
 
-  testWidgets('the completeness meter counts the draft, not the saved profile',
-      (WidgetTester tester) async {
-    await open(tester);
-    // The demo student has everything but a picture and a bio.
-    expect(find.text('Still missing: a picture, a bio.'), findsOneWidget);
-    expect(find.text('10 of 12'), findsOneWidget);
+  testWidgets(
+    'the completeness meter counts the draft, not the saved profile',
+    (WidgetTester tester) async {
+      await open(tester);
+      // The demo student has everything but a picture and a bio.
+      expect(find.text('Still missing: a picture, a bio.'), findsOneWidget);
+      expect(find.text('10 of 12'), findsOneWidget);
 
-    await tapLabel(tester, 'Edit profile');
-    await tester.enterText(field('Bio'), 'Worked examples, mostly.');
-    await settle(tester);
+      await tapLabel(tester, 'Edit profile');
+      await tester.enterText(field('Bio'), 'Worked examples, mostly.');
+      await settle(tester);
 
-    expect(find.text('Still missing: a picture.'), findsOneWidget);
-    expect(find.text('11 of 12'), findsOneWidget);
+      expect(find.text('Still missing: a picture.'), findsOneWidget);
+      expect(find.text('11 of 12'), findsOneWidget);
 
-    await tapLabel(tester, 'Cancel');
+      await tapLabel(tester, 'Cancel');
 
-    expect(find.text('Still missing: a picture, a bio.'), findsOneWidget);
-    expect(find.text('10 of 12'), findsOneWidget);
-  });
+      expect(find.text('Still missing: a picture, a bio.'), findsOneWidget);
+      expect(find.text('10 of 12'), findsOneWidget);
+    },
+  );
 
-  testWidgets('a picture can be removed, and the initials come back',
-      (WidgetTester tester) async {
+  testWidgets('a picture can be removed, and the initials come back', (
+    WidgetTester tester,
+  ) async {
     final AppState state = AppState()..photo = _redDot;
     await open(tester, state: state);
 

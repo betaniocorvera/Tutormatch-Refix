@@ -16,12 +16,18 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+import 'package:tutormatch/widgets/location_map.dart';
 import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_layout.dart';
 import 'package:tutormatch/widgets/tm_status.dart';
 
 class PersonSummary extends StatelessWidget {
-  const PersonSummary({required this.person, this.photo, super.key});
+  const PersonSummary({
+    required this.person,
+    this.photo,
+    this.distanceKm,
+    super.key,
+  });
 
   final Candidate person;
 
@@ -29,9 +35,14 @@ class PersonSummary extends StatelessWidget {
   /// them. Null for everybody else — nobody else's picture exists.
   final Uint8List? photo;
 
+  /// Distance from the viewer, when this person was opened from a ranked list.
+  /// Null on the profile preview, and whenever either side hides their area.
+  final double? distanceKm;
+
   @override
   Widget build(BuildContext context) {
     final bool hasBio = person.bio.trim().isNotEmpty;
+    final PublicPlace? place = person.publicPlace;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -61,6 +72,19 @@ class PersonSummary extends StatelessWidget {
         PersonStatusLine(presence: person.presence, statusText: person.statusText),
         const SizedBox(height: Space.lg),
         PersonFactLine(candidate: person),
+        if (place != null) ...<Widget>[
+          const SizedBox(height: Space.xxl),
+          const TMRule(label: 'Approximate area'),
+          const SizedBox(height: Space.lg),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: LocationCard(
+              place: place,
+              distanceKm: distanceKm,
+              height: 220,
+            ),
+          ),
+        ],
         const SizedBox(height: Space.xxl),
         const TMRule(label: 'In their own words'),
         const SizedBox(height: Space.lg),
@@ -169,8 +193,8 @@ class PersonFacts extends StatelessWidget {
           label: 'Age',
           value: '${ageOn(born, DateTime.now())} years old',
         ),
-      if (person.livesIn.trim().isNotEmpty)
-        _Column(label: 'Lives in', value: person.livesIn.trim()),
+      if (person.publicPlace != null)
+        _Column(label: 'Lives in', value: person.publicPlace!.label),
       if (person.gender.trim().isNotEmpty && person.gender != Profile.noAnswer)
         _Column(label: 'Gender', value: person.gender.trim()),
       if (tutor && person.years != null)

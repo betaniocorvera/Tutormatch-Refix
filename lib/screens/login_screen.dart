@@ -52,7 +52,13 @@ class _LoginScreenState extends State<LoginScreen> {
     if (emailError != null || passwordError != null) return;
 
     setState(() => _busy = true);
-    AppStateScope.read(context).role = _role;
+    final AppState state = AppStateScope.read(context);
+    state.role = _role;
+    // There is no account behind the form, so signing in has to land on the
+    // demo profile for the chosen side. Without this a tutor would arrive on
+    // the student profile — including its location — and every tutor-only
+    // field would be missing.
+    state.profile = _role == Role.student ? demoStudentProfile : demoTutorProfile;
     Future<void>.delayed(const Duration(milliseconds: 520), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacementNamed(Routes.matches);

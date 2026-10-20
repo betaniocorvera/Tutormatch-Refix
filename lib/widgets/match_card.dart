@@ -106,7 +106,7 @@ class MatchResultCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: Space.lg),
-        _Facts(candidate: c),
+        _Facts(result: result),
       ],
     );
 
@@ -377,13 +377,22 @@ class _ProfileTag extends StatelessWidget {
   }
 }
 
-/// Subjects, format, rate and the review line. Facts, set as facts.
+/// Subjects, format, rate, the review line, and the public area. Facts, set as
+/// facts. The area appears only when the person allows it; a distance joins it
+/// only when both sides have a public area. There is no "private" placeholder,
+/// because naming the absence is still a fact about the person.
 class _Facts extends StatelessWidget {
-  const _Facts({required this.candidate});
-  final Candidate candidate;
+  const _Facts({required this.result});
+  final MatchResult result;
 
   @override
   Widget build(BuildContext context) {
+    final Candidate candidate = result.candidate;
+    final PublicPlace? place = candidate.publicPlace;
+    final String? distance = result.distanceKm == null
+        ? null
+        : describeDistance(result.distanceKm!);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -410,13 +419,40 @@ class _Facts extends StatelessWidget {
             Text(candidate.rateCopy, style: AppType.figure.tone(AppColors.ink)),
           ],
         ),
-        const SizedBox(height: Space.sm),
-        Text(
-          candidate.reviews > 0
-              ? '${candidate.rating} from ${candidate.reviews} reviews · ${candidate.location}'
-              : candidate.location,
-          style: AppType.bodySmall.quieter,
-        ),
+        if (candidate.reviews > 0) ...<Widget>[
+          const SizedBox(height: Space.sm),
+          Text(
+            '${candidate.rating} from ${candidate.reviews} reviews',
+            style: AppType.bodySmall.quieter,
+          ),
+        ],
+        if (place != null || distance != null) ...<Widget>[
+          const SizedBox(height: Space.xs),
+          Row(
+            children: <Widget>[
+              const TMIcon(
+                TMIconName.pin,
+                size: 13,
+                color: AppColors.inkMuted,
+              ),
+              const SizedBox(width: Space.xs + 1),
+              if (place != null)
+                Flexible(
+                  child: Text(
+                    place.label,
+                    style: AppType.bodySmall.tone(AppColors.inkSecondary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              if (distance != null)
+                Text(
+                  '${place == null ? '' : ' · '}$distance',
+                  style: AppType.bodySmall.quieter,
+                ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -468,7 +504,7 @@ class _Reason extends StatelessWidget {
                 child: Text(note.detail, style: AppType.bodySmall.quieter),
               ),
               const SizedBox(height: Space.xs),
-              Text(note.dimension.label.toUpperCase(), style: AppType.micro.tone(AppColors.inkMuted)),
+              Text(note.dimensionLabel.toUpperCase(), style: AppType.micro.tone(AppColors.inkMuted)),
             ],
           ),
         ),

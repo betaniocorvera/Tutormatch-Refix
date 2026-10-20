@@ -26,6 +26,8 @@ enum TMIconName {
   menu,
   close,
   sliders,
+  pin,
+  map,
 
   // The chat.
   phone,
@@ -161,6 +163,38 @@ class _TMIconPainter extends CustomPainter {
         canvas.drawLine(at(3.5, 16), at(20.5, 16), p);
         canvas.drawRect(Rect.fromCenter(center: at(9, 8), width: 4.5 * s, height: 7 * s), p);
         canvas.drawRect(Rect.fromCenter(center: at(15.5, 16), width: 4.5 * s, height: 7 * s), p);
+
+      case TMIconName.pin:
+        // A location mark, not a house: a teardrop with a hollow centre. The
+        // product never knows where a house is, so the icon does not draw one.
+        canvas.drawPath(
+          Path()
+            ..moveTo(12 * s, 21 * s)
+            ..cubicTo(12 * s, 21 * s, 5 * s, 14.5 * s, 5 * s, 9.5 * s)
+            ..cubicTo(5 * s, 5.6 * s, 8.1 * s, 3 * s, 12 * s, 3 * s)
+            ..cubicTo(15.9 * s, 3 * s, 19 * s, 5.6 * s, 19 * s, 9.5 * s)
+            ..cubicTo(19 * s, 14.5 * s, 12 * s, 21 * s, 12 * s, 21 * s)
+            ..close(),
+          p,
+        );
+        canvas.drawCircle(at(12, 9.5), 2.4 * s, p);
+
+      case TMIconName.map:
+        canvas.drawPath(
+          Path()
+            ..moveTo(3.5 * s, 6 * s)
+            ..lineTo(9 * s, 4 * s)
+            ..lineTo(15 * s, 6 * s)
+            ..lineTo(20.5 * s, 4 * s)
+            ..lineTo(20.5 * s, 18 * s)
+            ..lineTo(15 * s, 20 * s)
+            ..lineTo(9 * s, 18 * s)
+            ..lineTo(3.5 * s, 20 * s)
+            ..close(),
+          p,
+        );
+        canvas.drawLine(at(9, 4), at(9, 18), p);
+        canvas.drawLine(at(15, 6), at(15, 20), p);
 
       case TMIconName.phone:
         canvas.drawPath(_phoneOutline(s), p);

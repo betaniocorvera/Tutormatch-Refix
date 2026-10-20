@@ -27,6 +27,7 @@
 // skip onboarding. Walk the onboarding flow and the time dimension moves.
 // ═════════════════════════════════════════════════════════════════════════════
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show Color;
 
@@ -224,7 +225,7 @@ extension MatchTierCopy on MatchTier {
 
 /// One plain-language reason, attached to the dimension that produced it.
 class FitNote {
-  const FitNote(this.dimension, this.signal, this.detail);
+  const FitNote(this.dimension, this.signal, this.detail, {this.label});
 
   /// The concrete fact, set in ink at the start of the line.
   final String signal;
@@ -233,6 +234,13 @@ class FitNote {
   final String detail;
 
   final MatchDimension dimension;
+
+  /// An override for reasons that are not one of the five scored dimensions.
+  /// "Nearby" is a fact about the pair, not a sixth score, so it borrows the
+  /// type without pretending to add weight to the ranking.
+  final String? label;
+
+  String get dimensionLabel => label ?? dimension.label;
 }
 
 /// One row of the recommendation pool — a tutor when the viewer is a student,
@@ -261,6 +269,10 @@ class Candidate {
     required this.fitBudget,
     required this.notes,
     this.livesIn = '',
+    this.placeId = '',
+    // The least public setting is the default for anyone whose privacy was
+    // never chosen. Sample rows set their own value explicitly.
+    this.locationPrivacy = LocationPrivacy.cityOnly,
     this.birthdate,
     this.statusText = '',
     this.presence = PresenceStatus.available,
@@ -294,8 +306,17 @@ class Candidate {
 
   /// The profile details. [location] says where a lesson can happen ("Online,
   /// from Leeds"); [livesIn] is the place itself, as they would say it.
+  ///
+  /// [placeId] points into [samplePlaces] and is the only coordinate source.
+  /// [locationPrivacy] decides how much of it is public; see [publicPlace].
   final String livesIn;
+  final String placeId;
+  final LocationPrivacy locationPrivacy;
   final DateTime? birthdate;
+
+  /// The area as other people are allowed to read it, or null when hidden or
+  /// unset. Use this rather than [livesIn] on any public or match surface.
+  PublicPlace? get publicPlace => publicPlaceFor(placeId, locationPrivacy);
 
   /// One short line, e.g. "Open for sessions". [presence] is the indicator.
   final String statusText;
@@ -370,6 +391,458 @@ extension PresenceStatusCopy on PresenceStatus {
       };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Places
+//
+// A deliberately small gazetteer, not a geocoder. Every place carries an
+// approximate neighbourhood centre; no street, building or house number exists
+// anywhere in this model, because none is ever needed or shown.
+//
+// The city centre is what "Show city only" resolves to. It is a separate point
+// from the neighbourhood, so choosing that setting genuinely widens the circle
+// rather than merely hiding the label.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// What a person allows other people to see about where they live.
+enum LocationPrivacy {
+  area(
+    'Show my area on my profile and in Search',
+    'People see the neighbourhood and a circle of about 1–2 km. Never a '
+        'street, a building or a house number.',
+  ),
+  cityOnly(
+    'Show city only',
+    'People see the city and a circle around its centre. The neighbourhood is '
+        'not shown.',
+  ),
+  hidden(
+    'Hide my location',
+    'People see no map, no area and no distance. You will not appear in '
+        'distance-filtered results.',
+  );
+
+  const LocationPrivacy(this.label, this.explanation);
+
+  /// The sentence used by the privacy control. Written out rather than
+  /// abbreviated, because this is the one setting where ambiguity is expensive.
+  final String label;
+  final String explanation;
+}
+
+/// A city or municipality in the demo catalogue, with the centre used when
+/// somebody chooses "Show city only".
+class City {
+  const City({
+    required this.region,
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final String region;
+  final String name;
+  final double latitude;
+  final double longitude;
+
+  String get id => '$region|$name';
+}
+
+/// One neighbourhood inside a [City] — the lowest, most precise level the
+/// public map ever shows.
+class Place {
+  const Place({
+    required this.id,
+    required this.city,
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final String id;
+  final City city;
+  final String name;
+  final double latitude;
+  final double longitude;
+
+  /// "Highbury, London" — the reading used when the area is visible.
+  String get label => '$name, ${city.name}';
+}
+
+/// The public reading of somebody's location, after their privacy setting has
+/// been applied. A person whose setting is [LocationPrivacy.hidden] resolves to
+/// null rather than to an object with a hidden flag, so every caller has to
+/// decide what to do about the absence instead of accidentally printing it.
+class PublicPlace {
+  const PublicPlace({
+    required this.label,
+    required this.city,
+    required this.latitude,
+    required this.longitude,
+    required this.cityOnly,
+  });
+
+  /// What other people may read: the city, or the neighbourhood and city.
+  final String label;
+  final String city;
+
+  /// The centre of the circle to draw. The city centre when [cityOnly], the
+  /// neighbourhood centroid otherwise. Never a home address.
+  final double latitude;
+  final double longitude;
+  final bool cityOnly;
+}
+
+/// The built-in catalogue. At least twelve areas, spread across the places the
+/// sample people actually live in. No network call, no geocoder, no API key.
+const City cityLondon = City(
+  region: 'Greater London',
+  name: 'London',
+  latitude: 51.5072,
+  longitude: -0.1276,
+);
+const City cityManchester = City(
+  region: 'North West England',
+  name: 'Manchester',
+  latitude: 53.4808,
+  longitude: -2.2426,
+);
+const City cityCardiff = City(
+  region: 'Wales',
+  name: 'Cardiff',
+  latitude: 51.4816,
+  longitude: -3.1791,
+);
+const City cityLeeds = City(
+  region: 'Yorkshire and the Humber',
+  name: 'Leeds',
+  latitude: 53.8008,
+  longitude: -1.5491,
+);
+const City cityEdinburgh = City(
+  region: 'Scotland',
+  name: 'Edinburgh',
+  latitude: 55.9533,
+  longitude: -3.1883,
+);
+const City cityMelbourne = City(
+  region: 'Victoria',
+  name: 'Melbourne',
+  latitude: -37.8136,
+  longitude: 144.9631,
+);
+const City cityPorto = City(
+  region: 'Porto',
+  name: 'Porto',
+  latitude: 41.1579,
+  longitude: -8.6291,
+);
+const City cityParis = City(
+  region: 'Île-de-France',
+  name: 'Paris',
+  latitude: 48.8566,
+  longitude: 2.3522,
+);
+const City cityBristol = City(
+  region: 'South West England',
+  name: 'Bristol',
+  latitude: 51.4545,
+  longitude: -2.5879,
+);
+const City cityBirmingham = City(
+  region: 'West Midlands',
+  name: 'Birmingham',
+  latitude: 52.4862,
+  longitude: -1.8904,
+);
+const City citySheffield = City(
+  region: 'South Yorkshire',
+  name: 'Sheffield',
+  latitude: 53.3811,
+  longitude: -1.4701,
+);
+const City cityBath = City(
+  region: 'Somerset',
+  name: 'Bath',
+  latitude: 51.3811,
+  longitude: -2.3590,
+);
+const City cityLyon = City(
+  region: 'Auvergne-Rhône-Alpes',
+  name: 'Lyon',
+  latitude: 45.7640,
+  longitude: 4.8357,
+);
+const City cityOxford = City(
+  region: 'Oxfordshire',
+  name: 'Oxford',
+  latitude: 51.7520,
+  longitude: -1.2577,
+);
+const City cityCairo = City(
+  region: 'Cairo Governorate',
+  name: 'Cairo',
+  latitude: 30.0444,
+  longitude: 31.2357,
+);
+const City cityNottingham = City(
+  region: 'Nottinghamshire',
+  name: 'Nottingham',
+  latitude: 52.9548,
+  longitude: -1.1581,
+);
+const City cityRotterdam = City(
+  region: 'South Holland',
+  name: 'Rotterdam',
+  latitude: 51.9244,
+  longitude: 4.4777,
+);
+const City cityBrighton = City(
+  region: 'East Sussex',
+  name: 'Brighton',
+  latitude: 50.8225,
+  longitude: -0.1372,
+);
+
+const List<City> sampleCities = <City>[
+  cityLondon,
+  cityManchester,
+  cityCardiff,
+  cityLeeds,
+  cityEdinburgh,
+  cityMelbourne,
+  cityPorto,
+  cityParis,
+  cityBristol,
+  cityBirmingham,
+  citySheffield,
+  cityBath,
+  cityLyon,
+  cityOxford,
+  cityCairo,
+  cityNottingham,
+  cityRotterdam,
+  cityBrighton,
+];
+
+const List<Place> samplePlaces = <Place>[
+  Place(
+    id: 'london-highbury',
+    city: cityLondon,
+    name: 'Highbury',
+    latitude: 51.5520,
+    longitude: -0.0970,
+  ),
+  Place(
+    id: 'london-camden',
+    city: cityLondon,
+    name: 'Camden',
+    latitude: 51.5390,
+    longitude: -0.1426,
+  ),
+  Place(
+    id: 'london-hackney',
+    city: cityLondon,
+    name: 'Hackney',
+    latitude: 51.5450,
+    longitude: -0.0553,
+  ),
+  Place(
+    id: 'london-islington',
+    city: cityLondon,
+    name: 'Islington',
+    latitude: 51.5416,
+    longitude: -0.1022,
+  ),
+  Place(
+    id: 'manchester-northern-quarter',
+    city: cityManchester,
+    name: 'Northern Quarter',
+    latitude: 53.4837,
+    longitude: -2.2346,
+  ),
+  Place(
+    id: 'manchester-didsbury',
+    city: cityManchester,
+    name: 'Didsbury',
+    latitude: 53.4165,
+    longitude: -2.2310,
+  ),
+  Place(
+    id: 'cardiff-riverside',
+    city: cityCardiff,
+    name: 'Riverside',
+    latitude: 51.4860,
+    longitude: -3.2000,
+  ),
+  Place(
+    id: 'leeds-hyde-park',
+    city: cityLeeds,
+    name: 'Hyde Park',
+    latitude: 53.8080,
+    longitude: -1.5660,
+  ),
+  Place(
+    id: 'edinburgh-leith',
+    city: cityEdinburgh,
+    name: 'Leith',
+    latitude: 55.9800,
+    longitude: -3.1700,
+  ),
+  Place(
+    id: 'melbourne-fitzroy',
+    city: cityMelbourne,
+    name: 'Fitzroy',
+    latitude: -37.7983,
+    longitude: 144.9781,
+  ),
+  Place(
+    id: 'porto-cedofeita',
+    city: cityPorto,
+    name: 'Cedofeita',
+    latitude: 41.1550,
+    longitude: -8.6200,
+  ),
+  Place(
+    id: 'paris-montmartre',
+    city: cityParis,
+    name: 'Montmartre',
+    latitude: 48.8867,
+    longitude: 2.3431,
+  ),
+  Place(
+    id: 'bristol-clifton',
+    city: cityBristol,
+    name: 'Clifton',
+    latitude: 51.4620,
+    longitude: -2.6200,
+  ),
+  Place(
+    id: 'birmingham-moseley',
+    city: cityBirmingham,
+    name: 'Moseley',
+    latitude: 52.4460,
+    longitude: -1.8880,
+  ),
+  Place(
+    id: 'sheffield-crookes',
+    city: citySheffield,
+    name: 'Crookes',
+    latitude: 53.3840,
+    longitude: -1.5080,
+  ),
+  Place(
+    id: 'bath-widcombe',
+    city: cityBath,
+    name: 'Widcombe',
+    latitude: 51.3750,
+    longitude: -2.3560,
+  ),
+  Place(
+    id: 'lyon-croix-rousse',
+    city: cityLyon,
+    name: 'Croix-Rousse',
+    latitude: 45.7740,
+    longitude: 4.8320,
+  ),
+  Place(
+    id: 'oxford-jericho',
+    city: cityOxford,
+    name: 'Jericho',
+    latitude: 51.7620,
+    longitude: -1.2670,
+  ),
+  Place(
+    id: 'cairo-zamalek',
+    city: cityCairo,
+    name: 'Zamalek',
+    latitude: 30.0600,
+    longitude: 31.2190,
+  ),
+  Place(
+    id: 'nottingham-hockley',
+    city: cityNottingham,
+    name: 'Hockley',
+    latitude: 52.9520,
+    longitude: -1.1460,
+  ),
+  Place(
+    id: 'rotterdam-kralingen',
+    city: cityRotterdam,
+    name: 'Kralingen',
+    latitude: 51.9240,
+    longitude: 4.5100,
+  ),
+  Place(
+    id: 'brighton-kemptown',
+    city: cityBrighton,
+    name: 'Kemptown',
+    latitude: 50.8190,
+    longitude: -0.1250,
+  ),
+];
+
+Place? placeById(String? id) {
+  if (id == null || id.isEmpty) return null;
+  for (final Place place in samplePlaces) {
+    if (place.id == id) return place;
+  }
+  return null;
+}
+
+/// The one place where privacy turns a stored area into a public one. Hidden
+/// resolves to null; city-only resolves to the city centre; area resolves to the
+/// neighbourhood centre. Every map, label and distance reads through here.
+PublicPlace? publicPlaceFor(String? placeId, LocationPrivacy privacy) {
+  if (privacy == LocationPrivacy.hidden) return null;
+  final Place? place = placeById(placeId);
+  if (place == null) return null;
+  if (privacy == LocationPrivacy.cityOnly) {
+    return PublicPlace(
+      label: place.city.name,
+      city: place.city.name,
+      latitude: place.city.latitude,
+      longitude: place.city.longitude,
+      cityOnly: true,
+    );
+  }
+  return PublicPlace(
+    label: place.label,
+    city: place.city.name,
+    latitude: place.latitude,
+    longitude: place.longitude,
+    cityOnly: false,
+  );
+}
+
+/// Great-circle distance in kilometres. The coordinates are approximate area
+/// centres, so the result is only ever shown rounded to a whole kilometre.
+double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+  const double earthRadiusKm = 6371.0088;
+  final double dLat = _radians(lat2 - lat1);
+  final double dLon = _radians(lon2 - lon1);
+  final double a = math.pow(math.sin(dLat / 2), 2) +
+      math.cos(_radians(lat1)) *
+          math.cos(_radians(lat2)) *
+          math.pow(math.sin(dLon / 2), 2);
+  return 2 * earthRadiusKm * math.asin(math.sqrt(a.clamp(0.0, 1.0)));
+}
+
+double _radians(double degrees) => degrees * math.pi / 180;
+
+/// The distance to render, or null when either side hides its location or has
+/// not chosen one. Null means "do not show a distance", never "zero".
+double? distanceBetween(PublicPlace? from, PublicPlace? to) {
+  if (from == null || to == null) return null;
+  return haversineKm(from.latitude, from.longitude, to.latitude, to.longitude);
+}
+
+/// "about 3 km away". The one wording used on cards and maps.
+String describeDistance(double km) =>
+    km < 1 ? 'less than 1 km away' : 'about ${km.round()} km away';
+
+/// How close counts as nearby for the "why this match" reason.
+const int nearbyDistanceKm = 5;
+
 const List<String> _monthNames = <String>[
   'January',
   'February',
@@ -414,6 +887,8 @@ class Profile {
     required this.goal,
     this.birthdate,
     this.livesIn = '',
+    this.placeId = '',
+    this.locationPrivacy = LocationPrivacy.cityOnly,
     this.statusText = '',
     this.presence = PresenceStatus.available,
     this.bio = '',
@@ -440,8 +915,17 @@ class Profile {
   final DateTime? birthdate;
 
   /// Where they live, in their own words. City, province — whatever they would
-  /// write on an envelope.
+  /// write on an envelope. Kept alongside the structured place so the
+  /// completeness meter and older copy keep working.
   final String livesIn;
+
+  /// The structured, editable half of the location: a [samplePlaces] id and the
+  /// privacy setting that governs what other people see.
+  final String placeId;
+  final LocationPrivacy locationPrivacy;
+
+  /// The viewer's own area, as they have chosen to show it elsewhere.
+  PublicPlace? get publicPlace => publicPlaceFor(placeId, locationPrivacy);
 
   /// One short line, e.g. "Open for sessions". [presence] says whether now is
   /// a good time; this says what they are up to.
@@ -500,6 +984,8 @@ class Profile {
     String? goal,
     DateTime? birthdate,
     String? livesIn,
+    String? placeId,
+    LocationPrivacy? locationPrivacy,
     String? statusText,
     PresenceStatus? presence,
     String? bio,
@@ -521,6 +1007,8 @@ class Profile {
         goal: goal ?? this.goal,
         birthdate: birthdate ?? this.birthdate,
         livesIn: livesIn ?? this.livesIn,
+        placeId: placeId ?? this.placeId,
+        locationPrivacy: locationPrivacy ?? this.locationPrivacy,
         statusText: statusText ?? this.statusText,
         presence: presence ?? this.presence,
         bio: bio ?? this.bio,
@@ -805,14 +1293,25 @@ class MatchResult {
   final Candidate candidate;
   final MatchScore score;
 
-  const MatchResult({required this.candidate, required this.score});
+  /// Distance between the two public areas, in kilometres. Null when either
+  /// side hides their location, has not chosen one, or when a caller builds a
+  /// result without a viewer to measure from.
+  final double? distanceKm;
+
+  const MatchResult({
+    required this.candidate,
+    required this.score,
+    this.distanceKm,
+  });
 
   int get rankScore => score.total;
   MatchTier get tier => tierFor(score.total);
 
-  /// The three highest-proportion dimensions, best first, each rendered as a
-  /// sentence. Time always competes on the same footing as the rest, so a
-  /// candidate with no shared hours cannot hide behind good subjects.
+  /// The three reasons that best explain this pairing, each rendered as a
+  /// sentence. The first two are the highest-proportion scored dimensions;
+  /// when the two people are within [nearbyDistanceKm], a third "Nearby" note
+  /// takes the last slot. Time always competes on the same footing as the rest,
+  /// so a candidate with no shared hours cannot hide behind good subjects.
   List<FitNote> get reasons {
     final List<FitNote> pool = <FitNote>[
       _timeNote(),
@@ -824,7 +1323,24 @@ class MatchResult {
       final double rb = fit[b.dimension]! / b.dimension.max;
       return rb.compareTo(ra);
     });
-    return pool.take(3).toList(growable: false);
+    final List<FitNote> top = pool.take(3).toList();
+    final double? km = distanceKm;
+    if (km != null && km <= nearbyDistanceKm) {
+      // Proximity is not a scored dimension, so it cannot earn a place by
+      // weight. It is added as a fact about the pair and takes the third slot,
+      // leaving the two strongest scoring reasons untouched above it.
+      top.insert(
+        math.min(2, top.length),
+        FitNote(
+          MatchDimension.format,
+          describeDistance(km),
+          'Close enough that an in-person session would not turn into a journey.',
+          label: 'Nearby',
+        ),
+      );
+      if (top.length > 3) top.removeLast();
+    }
+    return List<FitNote>.unmodifiable(top);
   }
 
   FitNote _timeNote() {
@@ -856,6 +1372,7 @@ class MatchFilters {
     this.maxRate = 80,
     this.requiredParts = const <int>{},
     this.mustBeFreeWhenIAm = false,
+    this.maxDistanceKm,
     this.minScore = 0,
   });
 
@@ -873,6 +1390,13 @@ class MatchFilters {
   /// reading learns what the pool is like. Hiding them by default would make
   /// the list look smaller than the pool and the ranking look like magic.
   final bool mustBeFreeWhenIAm;
+
+  /// The outermost distance, in kilometres, that a result may be from the
+  /// viewer. Null means "any distance". People with no public area (hidden, or
+  /// not set) cannot pass a distance filter, because there is nothing to
+  /// measure — which is exactly what hiding the area means.
+  final int? maxDistanceKm;
+
   final double minScore;
 
   MatchFilters copyWith({
@@ -882,6 +1406,8 @@ class MatchFilters {
     int? maxRate,
     Set<int>? requiredParts,
     bool? mustBeFreeWhenIAm,
+    int? maxDistanceKm,
+    bool clearDistance = false,
     double? minScore,
   }) =>
       MatchFilters(
@@ -890,6 +1416,8 @@ class MatchFilters {
         maxRate: maxRate ?? this.maxRate,
         requiredParts: requiredParts ?? this.requiredParts,
         mustBeFreeWhenIAm: mustBeFreeWhenIAm ?? this.mustBeFreeWhenIAm,
+        maxDistanceKm:
+            clearDistance ? null : (maxDistanceKm ?? this.maxDistanceKm),
         minScore: minScore ?? this.minScore,
       );
 
@@ -898,6 +1426,7 @@ class MatchFilters {
       mode != null ||
       maxRate < 80 ||
       requiredParts.isNotEmpty ||
+      maxDistanceKm != null ||
       minScore > 0;
 }
 
@@ -955,6 +1484,10 @@ bool _passes(MatchResult r, MatchFilters f) {
     if (!free) return false;
   }
   if (f.mustBeFreeWhenIAm && r.score.overlapSlots == 0) return false;
+  if (f.maxDistanceKm != null) {
+    final double? km = r.distanceKm;
+    if (km == null || km > f.maxDistanceKm!) return false;
+  }
   if (r.score.total < f.minScore) return false;
   return true;
 }
@@ -974,7 +1507,35 @@ EmptyExplanation _explain(
   int count(MatchFilters candidate) =>
       ranked.where((MatchResult r) => _passes(r, candidate)).length;
 
-  // 1. Time — the most common blocker and the one people least expect.
+  // 1. Distance — new, and the one filter that can fail for a privacy reason
+  // rather than a shortage of people. Say which of the two it is.
+  if (f.maxDistanceKm != null) {
+    final MatchFilters next = f.copyWith(clearDistance: true);
+    final int n = count(next);
+    if (n > 0) {
+      final bool canMeasure =
+          publicPlaceFor(viewer.placeId, viewer.locationPrivacy) != null;
+      options.add((
+        headline: canMeasure
+            ? 'Nobody within ${f.maxDistanceKm} km.'
+            : 'Distance needs a visible area on your profile.',
+        body: canMeasure
+            ? 'That limit removes everyone left in this list. Someone who has '
+                'hidden their area cannot be measured at all, and a city-only '
+                'area is measured from the city centre. Showing every distance '
+                'brings back $n of the ${ranked.length} candidates.'
+            : 'Your own area is hidden or not set, so the prototype has no '
+                'point to measure from. Choose an area — or change your privacy '
+                'setting — and the distance filter can work. Clearing it brings '
+                'back $n of the ${ranked.length} candidates.',
+        label: 'Show any distance',
+        next: next,
+        n: n,
+      ));
+    }
+  }
+
+  // 2. Time — the most common blocker and the one people least expect.
   if (f.mustBeFreeWhenIAm || f.requiredParts.isNotEmpty) {
     final MatchFilters next = f.copyWith(
       mustBeFreeWhenIAm: false,
@@ -998,7 +1559,7 @@ EmptyExplanation _explain(
     }
   }
 
-  // 2. Budget.
+  // 3. Budget.
   if (f.maxRate < 80) {
     final int cheapest = ranked.map((MatchResult r) => r.candidate.rate).reduce((int a, int b) => a < b ? a : b);
     if (cheapest > f.maxRate) {
@@ -1016,7 +1577,7 @@ EmptyExplanation _explain(
     }
   }
 
-  // 3. Mode.
+  // 4. Mode.
   if (f.mode != null) {
     final MatchFilters next = f.copyWith(clearMode: true, mode: null);
     final int n = count(next);
@@ -1033,7 +1594,7 @@ EmptyExplanation _explain(
     }
   }
 
-  // 4. Score floor.
+  // 5. Score floor.
   if (f.minScore > 0 && ranked.isNotEmpty) {
     final int best = ranked.first.rankScore;
     if (best < f.minScore) {
@@ -1050,7 +1611,7 @@ EmptyExplanation _explain(
     }
   }
 
-  // 5. Subjects.
+  // 6. Subjects.
   if (f.subjects.isNotEmpty) {
     final MatchFilters next = f.copyWith(subjects: const <String>{});
     final int n = count(next);
@@ -1126,9 +1687,14 @@ String? _partsPhrase(Set<int> parts) {
 /// Ranks a pool for a viewer. Sorted by score, then by rating, then by name so
 /// the order is never arbitrary between two equal scores.
 List<MatchResult> rank(List<Candidate> pool, Profile viewer) {
-  final List<MatchResult> ranked = pool
-      .map((Candidate c) => MatchResult(candidate: c, score: scoreOf(c, viewer)))
-      .toList();
+  final PublicPlace? from = viewer.publicPlace;
+  final List<MatchResult> ranked = pool.map((Candidate c) {
+    return MatchResult(
+      candidate: c,
+      score: scoreOf(c, viewer),
+      distanceKm: distanceBetween(from, c.publicPlace),
+    );
+  }).toList();
   ranked.sort((MatchResult a, MatchResult b) {
     final int byScore = b.rankScore.compareTo(a.rankScore);
     if (byScore != 0) return byScore;
@@ -1157,6 +1723,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 46,
     location: 'Online, from Manchester',
     livesIn: 'Manchester',
+    placeId: 'manchester-northern-quarter',
+    locationPrivacy: LocationPrivacy.cityOnly,
     birthdate: DateTime(1991, 6, 2),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -1209,6 +1777,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 49,
     location: 'Riverside, and online',
     livesIn: 'Riverside, Cardiff',
+    placeId: 'cardiff-riverside',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1988, 1, 19),
     statusText: 'Evenings mostly full',
     presence: PresenceStatus.busy,
@@ -1256,6 +1826,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 52,
     location: 'Online, from Leeds',
     livesIn: 'Leeds, West Yorkshire',
+    placeId: 'leeds-hyde-park',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1990, 9, 8),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -1303,6 +1875,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 58,
     location: 'Online, from Edinburgh',
     livesIn: 'Edinburgh, Scotland',
+    placeId: 'edinburgh-leith',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1987, 11, 30),
     statusText: 'Evenings and weekends',
     presence: PresenceStatus.available,
@@ -1349,6 +1923,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 40,
     location: 'Fitzroy, and online',
     livesIn: 'Fitzroy, Melbourne',
+    placeId: 'melbourne-fitzroy',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1986, 4, 12),
     statusText: 'SAT season is open',
     presence: PresenceStatus.available,
@@ -1395,6 +1971,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 28,
     location: 'Online, from Porto',
     livesIn: 'Porto, Portugal',
+    placeId: 'porto-cedofeita',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1998, 2, 27),
     statusText: 'Away until the 20th — exam marking',
     presence: PresenceStatus.away,
@@ -1442,6 +2020,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 38,
     location: 'Camden, and online',
     livesIn: 'Camden, London',
+    placeId: 'london-camden',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1984, 7, 4),
     statusText: 'Weekday afternoons free',
     presence: PresenceStatus.busy,
@@ -1487,6 +2067,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 44,
     location: 'Hackney, and online',
     livesIn: 'Hackney, London',
+    placeId: 'london-hackney',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1995, 5, 16),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -1533,6 +2115,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 34,
     location: 'Islington, in person only',
     livesIn: 'Islington, London',
+    placeId: 'london-islington',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1979, 10, 1),
     statusText: 'Full until the new year',
     presence: PresenceStatus.busy,
@@ -1578,6 +2162,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 30,
     location: 'Online, from Bristol',
     livesIn: 'Bristol',
+    placeId: 'bristol-clifton',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2000, 8, 21),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -1624,6 +2210,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 36,
     location: 'Online, from Birmingham',
     livesIn: 'Birmingham, West Midlands',
+    placeId: 'birmingham-moseley',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1993, 12, 5),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -1670,6 +2258,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 42,
     location: 'Sheffield, in person only',
     livesIn: 'Sheffield, South Yorkshire',
+    placeId: 'sheffield-crookes',
+    locationPrivacy: LocationPrivacy.hidden,
     birthdate: DateTime(1985, 3, 23),
     statusText: 'One slot left on Wednesdays',
     presence: PresenceStatus.busy,
@@ -1678,7 +2268,7 @@ final List<Candidate> sampleTutors = <Candidate>[
     reviews: 45,
     bio: 'We draw everything before we write anything. It is slower for a term, '
         'and then geometry stops being a memory test.',
-    credentials: <String>['BSc Mathematics, Sheffield'],
+    credentials: <String>['BSc Mathematics'],
     languages: <String>['English', 'German'],
     availability: avail(const <String>['Mon-Aft', 'Tue-Aft', 'Thu-Aft', 'Sat-Morn']),
     fitSubjects: 24,
@@ -1698,7 +2288,7 @@ final List<Candidate> sampleTutors = <Candidate>[
       ),
       FitNote(
         MatchDimension.format,
-        'In person, in Sheffield',
+        'In person only',
         'Only workable if you are near her. That is the decision this match turns on.',
       ),
     ],
@@ -1715,6 +2305,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 55,
     location: 'Online, from Paris',
     livesIn: 'Paris, France',
+    placeId: 'paris-montmartre',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1996, 6, 11),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -1760,6 +2352,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 32,
     location: 'Bath, in person only',
     livesIn: 'Bath, Somerset',
+    placeId: 'bath-widcombe',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1972, 1, 29),
     statusText: 'Studio slots on Saturdays',
     presence: PresenceStatus.available,
@@ -1805,6 +2399,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 33,
     location: 'Online, from Lyon',
     livesIn: 'Lyon, France',
+    placeId: 'lyon-croix-rousse',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1990, 4, 3),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -1850,6 +2446,8 @@ final List<Candidate> sampleTutors = <Candidate>[
     rate: 31,
     location: 'Oxford, in person only',
     livesIn: 'Oxford, Oxfordshire',
+    placeId: 'oxford-jericho',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(1992, 9, 17),
     statusText: 'Evenings only this term',
     presence: PresenceStatus.busy,
@@ -1899,6 +2497,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 45,
     location: 'Highbury, will travel 3 km',
     livesIn: 'Highbury, London',
+    placeId: 'london-highbury',
+    locationPrivacy: LocationPrivacy.cityOnly,
     birthdate: DateTime(2009, 3, 14),
     statusText: 'Mocks in eleven weeks',
     presence: PresenceStatus.available,
@@ -1945,6 +2545,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 50,
     location: 'Online only, two hours ahead of you',
     livesIn: 'Cairo, Egypt',
+    placeId: 'cairo-zamalek',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2008, 7, 8),
     statusText: 'Revision until exams',
     presence: PresenceStatus.busy,
@@ -1991,6 +2593,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 60,
     location: 'Online only',
     livesIn: 'Nottingham',
+    placeId: 'nottingham-hockley',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2008, 2, 14),
     statusText: 'Open for sessions',
     presence: PresenceStatus.available,
@@ -2037,6 +2641,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 60,
     location: 'Online only, one hour ahead of you',
     livesIn: 'Rotterdam, Netherlands',
+    placeId: 'rotterdam-kralingen',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2009, 10, 6),
     statusText: 'Project work through the winter',
     presence: PresenceStatus.available,
@@ -2083,6 +2689,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 35,
     location: 'Online only',
     livesIn: 'Manchester',
+    placeId: 'manchester-didsbury',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2010, 5, 19),
     statusText: 'Weeknights after six',
     presence: PresenceStatus.available,
@@ -2128,6 +2736,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 40,
     location: 'Online only',
     livesIn: 'Brighton',
+    placeId: 'brighton-kemptown',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2009, 8, 2),
     statusText: 'Coursework deadlines this half term',
     presence: PresenceStatus.busy,
@@ -2173,6 +2783,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 40,
     location: 'Camden, in person only',
     livesIn: 'Camden, London',
+    placeId: 'london-camden',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2010, 11, 25),
     statusText: 'Afternoons only, with support',
     presence: PresenceStatus.available,
@@ -2218,6 +2830,8 @@ final List<Candidate> sampleStudents = <Candidate>[
     rate: 30,
     location: 'Bath, in person only',
     livesIn: 'Bath, Somerset',
+    placeId: 'bath-widcombe',
+    locationPrivacy: LocationPrivacy.area,
     birthdate: DateTime(2010, 6, 30),
     statusText: 'Back in two weeks',
     presence: PresenceStatus.away,
@@ -2868,6 +3482,8 @@ final Profile demoStudentProfile = Profile(
   goal: OnboardingOptions.studentGoals[1],
   birthdate: DateTime(2009, 3, 14),
   livesIn: 'Highbury, London',
+  placeId: 'london-highbury',
+  locationPrivacy: LocationPrivacy.cityOnly,
   statusText: 'Mocks in eleven weeks',
   presence: PresenceStatus.available,
   gender: 'Female',
@@ -2888,6 +3504,8 @@ final Profile demoTutorProfile = Profile(
   goal: OnboardingOptions.tutorGoals[0],
   birthdate: DateTime(1991, 6, 2),
   livesIn: 'Manchester',
+  placeId: 'manchester-northern-quarter',
+  locationPrivacy: LocationPrivacy.cityOnly,
   statusText: 'Open for sessions',
   presence: PresenceStatus.available,
   gender: 'Female',
@@ -2925,6 +3543,8 @@ Candidate profileAsCandidate(Profile p) => Candidate(
       rate: p.budget,
       location: p.livesIn,
       livesIn: p.livesIn,
+      placeId: p.placeId,
+      locationPrivacy: p.locationPrivacy,
       birthdate: p.birthdate,
       statusText: p.statusText,
       presence: p.presence,

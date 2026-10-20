@@ -126,7 +126,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
         // The person block is shared with the profile preview, so the page a
         // tutor opens for a student and the page a student previews are the
         // same page — fields and all — rather than two drawings of one idea.
-        PersonSummary(person: c),
+        PersonSummary(person: c, distanceKm: result.distanceKm),
         const SizedBox(height: Space.xxl),
         const TMRule(label: 'Why you matched'),
         const SizedBox(height: Space.lg),
@@ -270,7 +270,7 @@ class _Reason extends StatelessWidget {
                 child: Text(note.detail, style: AppType.bodySmall.quieter),
               ),
               const SizedBox(height: Space.xs),
-              Text(note.dimension.label.toUpperCase(), style: AppType.micro.tone(AppColors.inkMuted)),
+              Text(note.dimensionLabel.toUpperCase(), style: AppType.micro.tone(AppColors.inkMuted)),
             ],
           ),
         ),

@@ -26,6 +26,7 @@ import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/availability_grid.dart';
+import 'package:tutormatch/widgets/location_map.dart';
 import 'package:tutormatch/widgets/person_profile.dart';
 import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
@@ -49,7 +50,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _editing = false;
 
   late final TextEditingController _name;
-  late final TextEditingController _livesIn;
   late final TextEditingController _statusText;
   late final TextEditingController _bio;
   late final TextEditingController _years;
@@ -61,11 +61,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final Set<String> _languages = <String>{};
   String? _nameError;
 
+  /// The structured location while editing. The saved profile is untouched
+  /// until Save, exactly like every other detail on this form.
+  String _placeId = '';
+  LocationPrivacy _locationPrivacy = LocationPrivacy.cityOnly;
+
   @override
   void initState() {
     super.initState();
     _name = TextEditingController();
-    _livesIn = TextEditingController();
     _statusText = TextEditingController();
     _bio = TextEditingController();
     _years = TextEditingController();
@@ -76,7 +80,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _name.dispose();
-    _livesIn.dispose();
     _statusText.dispose();
     _bio.dispose();
     _years.dispose();
@@ -107,29 +110,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         TMNavItem(label: 'Profile', selected: true),
       ],
-      navTrailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Flexible(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 200),
-              child: Text(
-                '${p.name} · ${p.role == Role.student ? 'Student' : 'Tutor'}',
-                style: AppType.bodySmall.quieter,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+      navTrailing: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool showName =
+              !constraints.hasBoundedWidth || constraints.maxWidth >= 210;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (showName) ...<Widget>[
+                Flexible(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 200),
+                    child: Text(
+                      '${p.name} · ${p.role == Role.student ? 'Student' : 'Tutor'}',
+                      style: AppType.bodySmall.quieter,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: Space.sm),
+              ],
+              TMButton(
+                label: 'Sign out',
+                variant: TMButtonVariant.quiet,
+                minHeight: Hit.min,
+                onPressed: () =>
+                    Navigator.of(context)
+                        .popUntil((Route<void> r) => r.isFirst),
               ),
-            ),
-          ),
-          const SizedBox(width: Space.sm),
-          TMButton(
-            label: 'Sign out',
-            variant: TMButtonVariant.quiet,
-            minHeight: Hit.min,
-            onPressed: () =>
-                Navigator.of(context).popUntil((Route<void> r) => r.isFirst),
-          ),
-        ],
+            ],
+          );
+        },
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -191,24 +203,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// plus whatever the draft has changed so far. Nothing here reaches app
   /// state — Save does that.
   Profile _draft(Profile p) => p.copyWith(
-        name: _editing ? _name.text : null,
-        birthdate: _editing ? _birthdate : null,
-        livesIn: _editing ? _livesIn.text : null,
-        statusText: _editing ? _statusText.text : null,
-        presence: _editing ? _presence : null,
-        bio: _editing ? _bio.text : null,
-        gender: _editing ? _gender : null,
-        languages: _editing ? _languages.toList() : null,
-        years: _editing ? int.tryParse(_years.text.trim()) : null,
-        clearYears: _editing && _years.text.trim().isEmpty,
-        education: _editing ? _education.text : null,
-        grade: _editing ? _grade.text : null,
-      );
+    name: _editing ? _name.text : null,
+    birthdate: _editing ? _birthdate : null,
+    livesIn: _editing ? (placeById(_placeId)?.label ?? '') : null,
+    placeId: _editing ? _placeId : null,
+    locationPrivacy: _editing ? _locationPrivacy : null,
+    statusText: _editing ? _statusText.text : null,
+    presence: _editing ? _presence : null,
+    bio: _editing ? _bio.text : null,
+    gender: _editing ? _gender : null,
+    languages: _editing ? _languages.toList() : null,
+    years: _editing ? int.tryParse(_years.text.trim()) : null,
+    clearYears: _editing && _years.text.trim().isEmpty,
+    education: _editing ? _education.text : null,
+    grade: _editing ? _grade.text : null,
+  );
 
   Widget _identity(BuildContext context, AppState state) {
     final Profile p = _draft(state.profile);
-    final List<(String, bool)> gaps =
-        p.profileGaps(hasPicture: state.photo != null);
+    final List<(String, bool)> gaps = p.profileGaps(
+      hasPicture: state.photo != null,
+    );
     final int filled = gaps.where(((String, bool) gap) => gap.$2).length;
     final List<String> missing = <String>[
       for (final (String, bool) gap in gaps)
@@ -216,8 +231,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ];
     final String name = p.name.trim().isEmpty ? 'Your name' : p.name.trim();
     final List<String> meta = <String>[
-      if (p.birthdate != null) '${ageOn(p.birthdate!, DateTime.now())} years old',
-      if (p.livesIn.trim().isNotEmpty) p.livesIn.trim(),
+      if (p.birthdate != null)
+        '${ageOn(p.birthdate!, DateTime.now())} years old',
+      if (p.publicPlace != null) p.publicPlace!.label,
     ];
 
     return Column(
@@ -274,7 +290,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: Space.sm),
                   SizedBox(
                     width: 220,
-                    child: _Track(fraction: gaps.isEmpty ? 0 : filled / gaps.length),
+                    child: _Track(
+                      fraction: gaps.isEmpty ? 0 : filled / gaps.length,
+                    ),
                   ),
                   const SizedBox(height: Space.sm),
                   ConstrainedBox(
@@ -305,35 +323,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// again at the end of the form, because on a phone the form is taller than
   /// the screen and "Save" must not be a scroll away from the last field.
   List<Widget> _actions(BuildContext context, AppState state) => <Widget>[
-        if (_editing) ...<Widget>[
-          TMButton(
-            label: 'Save changes',
-            icon: TMIconName.check,
-            onPressed: () => _save(state),
-          ),
-          TMButton(
-            label: 'Cancel',
-            variant: TMButtonVariant.quiet,
-            onPressed: () => setState(() => _editing = false),
-          ),
-        ] else ...<Widget>[
-          TMButton(
-            label: 'Edit profile',
-            variant: TMButtonVariant.secondary,
-            onPressed: () => _beginEdit(state),
-          ),
-          TMButton(
-            label: 'Preview how others see you',
-            variant: TMButtonVariant.quiet,
-            onPressed: () => Navigator.of(context).pushNamed(Routes.profilePreview),
-          ),
-        ],
-      ];
+    if (_editing) ...<Widget>[
+      TMButton(
+        label: 'Save changes',
+        icon: TMIconName.check,
+        onPressed: () => _save(state),
+      ),
+      TMButton(
+        label: 'Cancel',
+        variant: TMButtonVariant.quiet,
+        onPressed: () => setState(() => _editing = false),
+      ),
+    ] else ...<Widget>[
+      TMButton(
+        label: 'Edit profile',
+        variant: TMButtonVariant.secondary,
+        onPressed: () => _beginEdit(state),
+      ),
+      TMButton(
+        label: 'Preview how others see you',
+        variant: TMButtonVariant.quiet,
+        onPressed: () => Navigator.of(context).pushNamed(Routes.profilePreview),
+      ),
+    ],
+  ];
 
   void _beginEdit(AppState state) {
     final Profile p = state.profile;
     _name.text = p.name;
-    _livesIn.text = p.livesIn;
+    _placeId = p.placeId;
+    _locationPrivacy = p.locationPrivacy;
     _statusText.text = p.statusText;
     _bio.text = p.bio;
     _years.text = p.years?.toString() ?? '';
@@ -356,15 +375,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() {
       _nameError = name.isEmpty
           ? 'A display name is required — it is the one thing every list and '
-              'every message shows first.'
+                'every message shows first.'
           : null;
     });
     if (_nameError != null) return;
 
+    final Place? place = placeById(_placeId);
     state.profile = state.profile.copyWith(
       name: name,
       birthdate: _birthdate,
-      livesIn: _livesIn.text.trim(),
+      livesIn: place?.label ?? '',
+      placeId: place?.id ?? '',
+      locationPrivacy: _locationPrivacy,
       statusText: _statusText.text.trim(),
       presence: _presence,
       bio: _bio.text.trim(),
@@ -474,6 +496,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// it is the same gap the meter above is counting.
   Widget _readOnly(BuildContext context, Profile p) {
     final bool tutor = p.role == Role.tutor;
+    final PublicPlace? place = p.publicPlace;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -484,9 +507,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               p.birthdate == null
                   ? null
                   : '${describeDate(p.birthdate!)} · '
-                      '${ageOn(p.birthdate!, DateTime.now())} years old',
+                        '${ageOn(p.birthdate!, DateTime.now())} years old',
             ),
-            ('Lives in', p.livesIn),
+            if (place != null) ('Lives in', place.label),
             (
               'Status',
               p.statusText.trim().isEmpty
@@ -494,10 +517,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   : '${p.presence.label} · ${p.statusText}',
             ),
             ('Gender', p.gender),
-            (
-              'Languages',
-              p.languages.isEmpty ? null : p.languages.join(', '),
-            ),
+            ('Languages', p.languages.isEmpty ? null : p.languages.join(', ')),
             if (tutor)
               (
                 'Years of experience',
@@ -507,6 +527,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             if (!tutor) ('Year level', p.grade),
           ],
         ),
+        if (place != null) ...<Widget>[
+          const SizedBox(height: Space.xl),
+          const TMMicroLabelText('Approximate area'),
+          const SizedBox(height: Space.sm),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: LocationCard(
+              place: place,
+              height: 230,
+              // The one map in the product that takes gestures. Everywhere
+              // else a scroll or a tap must not become a pan.
+              interactive: true,
+            ),
+          ),
+        ],
         const SizedBox(height: Space.xl),
         const TMMicroLabelText('Bio'),
         const SizedBox(height: Space.sm),
@@ -515,9 +550,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Text(
             p.bio.trim().isEmpty
                 ? 'No bio yet — a couple of lines about how you like to work is '
-                    'the thing people read before they write to you.'
+                      'the thing people read before they write to you.'
                 : '“${p.bio}”',
-            style: p.bio.trim().isEmpty ? AppType.bodyLarge.quieter : AppType.quote,
+            style: p.bio.trim().isEmpty
+                ? AppType.bodyLarge.quieter
+                : AppType.quote,
           ),
         ),
       ],
@@ -537,7 +574,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           label: 'Display name',
           controller: _name,
           error: _nameError,
-          reason: 'Shown on every list and message you appear in. Not compared '
+          reason:
+              'Shown on every list and message you appear in. Not compared '
               'against anybody.',
           onChanged: (String _) {
             if (_nameError != null) {
@@ -551,23 +589,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _DateField(
           label: 'Birthdate',
           value: _birthdate,
-          reason: 'Shown as your age, and nothing else — it is never part of '
+          reason:
+              'Shown as your age, and nothing else — it is never part of '
               'the ranking.',
           onTap: _pickBirthdate,
         ),
         const SizedBox(height: Space.xl),
-        TMTextField(
-          label: 'Lives in',
-          controller: _livesIn,
-          hint: 'Leeds, West Yorkshire',
-          reason: 'The city and province you are actually in. "Online" is a '
-              'format, not a place.',
-          onChanged: touched,
+        // Shared by both roles. Where you live is a fact about the person, not
+        // a student fact or a tutor fact, so this deliberately sits outside the
+        // role-specific fields below.
+        _LocationFields(
+          placeId: _placeId,
+          privacy: _locationPrivacy,
+          onPlaceChanged: (String id) => setState(() => _placeId = id),
+          onPrivacyChanged: (LocationPrivacy privacy) =>
+              setState(() => _locationPrivacy = privacy),
         ),
         const SizedBox(height: Space.xl),
         const TMFieldLabel(
           label: 'Availability',
-          reason: 'Whether now is a good time. Shown beside your status line, '
+          reason:
+              'Whether now is a good time. Shown beside your status line, '
               'and read by nothing else.',
         ),
         const SizedBox(height: Space.sm),
@@ -582,7 +624,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           label: 'Status',
           controller: _statusText,
           hint: 'Open for sessions',
-          reason: 'One short line about what you are up to — "Mocks in eleven '
+          reason:
+              'One short line about what you are up to — "Mocks in eleven '
               'weeks", "Evenings and weekends".',
           onChanged: touched,
         ),
@@ -592,14 +635,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           controller: _bio,
           maxLines: 5,
           hint: 'What you are like to work with, and what you are working on.',
-          reason: 'Set in italics on your profile, as a quotation — so write it '
+          reason:
+              'Set in italics on your profile, as a quotation — so write it '
               'in your own voice.',
           onChanged: touched,
         ),
         const SizedBox(height: Space.xl),
         const TMFieldLabel(
           label: 'Gender',
-          reason: 'Optional. "Prefer not to say" is a complete answer; it is '
+          reason:
+              'Optional. "Prefer not to say" is a complete answer; it is '
               'simply not printed on your profile.',
         ),
         const SizedBox(height: Space.sm),
@@ -637,7 +682,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             label: 'Education',
             controller: _education,
             hint: 'MSc Mathematics, Manchester',
-            reason: 'The one line a student checks first. Degrees, teaching '
+            reason:
+                'The one line a student checks first. Degrees, teaching '
                 'qualifications, or neither.',
             onChanged: touched,
           ),
@@ -658,10 +704,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _answers(BuildContext context, AppState state) {
     final Profile p = state.profile;
     final bool student = p.role == Role.student;
-    final List<String> styles =
-        student ? OnboardingOptions.studentStyles : OnboardingOptions.tutorStyles;
-    final List<String> goals =
-        student ? OnboardingOptions.studentGoals : OnboardingOptions.tutorGoals;
+    final List<String> styles = student
+        ? OnboardingOptions.studentStyles
+        : OnboardingOptions.tutorStyles;
+    final List<String> goals = student
+        ? OnboardingOptions.studentGoals
+        : OnboardingOptions.tutorGoals;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -674,13 +722,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _Answer(
           number: 1,
           title: MatchDimension.subjects.label,
-          note: '${MatchDimension.subjects.max} of 100 points. '
+          note:
+              '${MatchDimension.subjects.max} of 100 points. '
               '${MatchDimension.subjects.explainer}',
           child: TMTagPicker(
             options: OnboardingOptions.subjects,
             selected: p.subjects.toSet(),
             max: 4,
-            maxReachedNote: 'Four is the limit here. A shorter list ranks you '
+            maxReachedNote:
+                'Four is the limit here. A shorter list ranks you '
                 'better than a long one: the recommender reads every subject you '
                 'add as something you actually want to be taught.',
             onToggle: (String s) {
@@ -695,7 +745,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _Answer(
           number: 2,
           title: MatchDimension.time.label,
-          note: '${MatchDimension.time.max} of 100 points, worked out cell by '
+          note:
+              '${MatchDimension.time.max} of 100 points, worked out cell by '
               'cell against the other person\'s week — so this is the answer '
               'that moves the list most when you change it.',
           child: AvailabilityEditor(
@@ -709,7 +760,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _Answer(
           number: 3,
           title: MatchDimension.style.label,
-          note: '${MatchDimension.style.max} of 100 points. '
+          note:
+              '${MatchDimension.style.max} of 100 points. '
               '${MatchDimension.style.explainer}',
           child: _Disclosure(
             summary: p.style,
@@ -728,7 +780,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _Answer(
           number: 4,
           title: MatchDimension.format.label,
-          note: '${MatchDimension.format.max} of 100 points. '
+          note:
+              '${MatchDimension.format.max} of 100 points. '
               '${MatchDimension.format.explainer}',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -740,19 +793,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   SessionMode.both,
                 ],
                 selected: p.mode,
-                onSelect: (SessionMode m) => state.profile = p.copyWith(mode: m),
+                onSelect: (SessionMode m) =>
+                    state.profile = p.copyWith(mode: m),
                 labelOf: (SessionMode m) => m.label,
               ),
               const SizedBox(height: Space.sm),
               Text(
                 p.mode == SessionMode.both
                     ? 'Both sides of the list are open to you. Every tutor who '
-                        'teaches online counts, and so does the one who only '
-                        'teaches in a room.'
+                          'teaches online counts, and so does the one who only '
+                          'teaches in a room.'
                     : 'People who teach ${p.mode.counterLabel} still rank, they '
-                        'just lose the ${MatchDimension.format.max} points this '
-                        'dimension is worth — which is why they sort lower '
-                        'instead of disappearing.',
+                          'just lose the ${MatchDimension.format.max} points this '
+                          'dimension is worth — which is why they sort lower '
+                          'instead of disappearing.',
                 style: AppType.bodySmall.quieter,
               ),
             ],
@@ -763,7 +817,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _Answer(
           number: 5,
           title: MatchDimension.budget.label,
-          note: '${MatchDimension.budget.max} of 100 points. '
+          note:
+              '${MatchDimension.budget.max} of 100 points. '
               '${MatchDimension.budget.explainer}',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -777,7 +832,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 student
                     ? 'A ceiling, not a target. ${p.budget >= 80 ? 'Set to any price, so cost stops counting.' : 'Anyone above \$${p.budget} an hour still appears — the reason line says by how much.'}'
                     : 'Your going rate. Students whose ceiling is below it still '
-                        'appear, with the gap stated as one of their reasons.',
+                          'appear, with the gap stated as one of their reasons.',
                 style: AppType.bodySmall.quieter,
               ),
             ],
@@ -788,7 +843,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _Answer(
           number: null,
           title: 'What you want out of it',
-          note: 'Not one of the five. Nothing above changes because of this — it '
+          note:
+              'Not one of the five. Nothing above changes because of this — it '
               'is here so that whoever reads your request knows what you are '
               'aiming at before they answer it.',
           child: _Disclosure(
@@ -858,7 +914,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const TMInlineNote(
           tone: StatusTone.neutral,
           title: 'None of this is saved',
-          body: 'TutorMatch is an interface prototype with no accounts behind '
+          body:
+              'TutorMatch is an interface prototype with no accounts behind '
               'it. The answers above live in memory for as long as this tab is '
               'open, and reloading puts you back to the sample profile. Nothing '
               'is sent to a server, because there is no server.',
@@ -871,6 +928,210 @@ class _ProfileScreenState extends State<ProfileScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 // One numbered answer
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// The place picker and its public preview.
+///
+/// Three dependent fields over the built-in gazetteer, then the map those
+/// choices produce. The preview always centres on the chosen neighbourhood so
+/// the person can see what they picked; the privacy setting decides what other
+/// people get to see, and the sentence underneath says exactly that.
+class _LocationFields extends StatelessWidget {
+  const _LocationFields({
+    required this.placeId,
+    required this.privacy,
+    required this.onPlaceChanged,
+    required this.onPrivacyChanged,
+  });
+
+  final String placeId;
+  final LocationPrivacy privacy;
+  final ValueChanged<String> onPlaceChanged;
+  final ValueChanged<LocationPrivacy> onPrivacyChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final Place? place = placeById(placeId);
+    final City? city = place?.city;
+    final List<String> regions =
+        sampleCities.map((City c) => c.region).toSet().toList()..sort();
+    final List<City> cities = city == null
+        ? const <City>[]
+        : sampleCities
+              .where((City c) => c.region == city.region)
+              .toList(growable: false);
+    final List<Place> places = city == null
+        ? const <Place>[]
+        : samplePlaces
+              .where((Place p) => p.city.name == city.name)
+              .toList(growable: false);
+
+    final Widget cityField = TMDropdown<City>(
+      key: const Key('place-city'),
+      label: 'City / municipality',
+      value: city,
+      options: cities,
+      enabled: cities.isNotEmpty,
+      hint: 'Choose a city',
+      labelOf: (City c) => c.name,
+      onChanged: (City next) {
+        final Place first = samplePlaces.firstWhere(
+          (Place p) => p.city.name == next.name,
+        );
+        onPlaceChanged(first.id);
+      },
+    );
+
+    final Widget areaField = TMDropdown<Place>(
+      key: const Key('place-area'),
+      label: 'Barangay / area',
+      value: place,
+      options: places,
+      enabled: places.isNotEmpty,
+      hint: 'Choose an area',
+      labelOf: (Place p) => p.name,
+      onChanged: (Place next) => onPlaceChanged(next.id),
+    );
+
+    // This is the owner's preview, so it is centred on the chosen area and
+    // does not depend on the privacy setting. When no area has been chosen yet
+    // the map still appears, centred on the catalogue's default place, with a
+    // caption that asks for one. Privacy governs what other people see; it
+    // never removes this map.
+    final Place mapPlace = place ?? samplePlaces.first;
+    final bool hasPlace = place != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const TMMicroLabelText('Lives in'),
+        const SizedBox(height: Space.md),
+        TMDropdown<String>(
+          key: const Key('place-region'),
+          label: 'Province / region',
+          value: city?.region,
+          options: regions,
+          hint: 'Choose a province or region',
+          reason:
+              'The built-in list is small and offline on purpose: this is a '
+              'prototype, not an address lookup.',
+          labelOf: (String region) => region,
+          onChanged: (String region) {
+            final City firstCity = sampleCities.firstWhere(
+              (City c) => c.region == region,
+            );
+            final Place firstPlace = samplePlaces.firstWhere(
+              (Place p) => p.city.name == firstCity.name,
+            );
+            onPlaceChanged(firstPlace.id);
+          },
+        ),
+        const SizedBox(height: Space.lg),
+        LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            if (constraints.maxWidth >= 420) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(child: cityField),
+                  const SizedBox(width: Space.md),
+                  Expanded(child: areaField),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                cityField,
+                const SizedBox(height: Space.lg),
+                areaField,
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: Space.lg),
+        LocationMap(
+          centerLatitude: mapPlace.latitude,
+          centerLongitude: mapPlace.longitude,
+          height: 190,
+          caption: hasPlace ? mapPlace.label : 'Choose your area',
+          captionNote: hasPlace
+              ? switch (privacy) {
+                  LocationPrivacy.area => 'visible to others',
+                  LocationPrivacy.cityOnly => 'others see the city',
+                  LocationPrivacy.hidden => 'preview only',
+                }
+              : null,
+          fallbackTitle: hasPlace ? mapPlace.label : 'Choose your area',
+          semanticLabel: hasPlace
+              ? 'Map preview of ${mapPlace.label}. ${privacy.explanation}'
+              : 'Map preview centred on a default place. Choose your area.',
+        ),
+        const SizedBox(height: Space.sm),
+        Text(
+          !hasPlace
+              ? 'Choose a region, city and area to set the centre of this '
+                    'preview.'
+              : switch (privacy) {
+                  LocationPrivacy.area =>
+                    'Others will see ${mapPlace.label} and a circle of about '
+                        '1–2 km.',
+                  LocationPrivacy.cityOnly =>
+                    'Others will see ${mapPlace.city.name} and a circle around '
+                        'its centre — not ${mapPlace.name}.',
+                  LocationPrivacy.hidden =>
+                    'This preview is only for you. Others will see no map, no '
+                        'area and no distance.',
+                },
+          style: AppType.bodySmall.tone(AppColors.inkSecondary),
+        ),
+        const SizedBox(height: Space.xl),
+        const TMFieldLabel(
+          label: 'Location privacy',
+          reason:
+              'This is the only control that decides what other people see. '
+              'It never changes your saved area.',
+        ),
+        const SizedBox(height: Space.sm),
+        TMChoiceList<LocationPrivacy>(
+          options: LocationPrivacy.values,
+          selected: privacy,
+          onSelect: onPrivacyChanged,
+          labelOf: (LocationPrivacy value) => value.label,
+        ),
+        const SizedBox(height: Space.sm),
+        Text(privacy.explanation, style: AppType.bodySmall.quieter),
+        const SizedBox(height: Space.md),
+        Container(
+          padding: const EdgeInsets.only(left: Space.md),
+          decoration: const BoxDecoration(
+            border: Border(left: BorderSide(color: AppColors.accent, width: 2)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Padding(
+                padding: EdgeInsets.only(top: 3),
+                child: TMIcon(
+                  TMIconName.pin,
+                  size: 14,
+                  color: AppColors.accent,
+                ),
+              ),
+              const SizedBox(width: Space.sm),
+              Expanded(
+                child: Text(
+                  'Only your approximate area is shown to others. Your exact '
+                  'address is never shared.',
+                  style: AppType.bodySmall.tone(AppColors.inkSecondary),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _Answer extends StatelessWidget {
   const _Answer({
@@ -895,8 +1156,8 @@ class _Answer extends StatelessWidget {
     final String label = number == null
         ? title
         : compact
-            ? '$number. $title'
-            : title;
+        ? '$number. $title'
+        : title;
 
     final Widget body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1019,12 +1280,17 @@ class _DisclosureLink extends StatelessWidget {
       semanticButton: false,
       semanticLabel: label,
       builder: (BuildContext context, TMState s) {
-        final Color ink = s.hovered || s.focused ? AppColors.accent : AppColors.ink;
+        final Color ink = s.hovered || s.focused
+            ? AppColors.accent
+            : AppColors.ink;
         return TMFocusRing(
           focused: s.focused,
           radius: Radii.sharp,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.sm, horizontal: Space.xxs),
+            padding: const EdgeInsets.symmetric(
+              vertical: Space.sm,
+              horizontal: Space.xxs,
+            ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
@@ -1033,7 +1299,9 @@ class _DisclosureLink extends StatelessWidget {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppType.bodySmall.tone(ink).copyWith(
+                    style: AppType.bodySmall
+                        .tone(ink)
+                        .copyWith(
                           decoration: s.hovered || s.focused
                               ? TextDecoration.underline
                               : TextDecoration.none,
@@ -1278,7 +1546,10 @@ class _PictureSheet extends StatelessWidget {
             children: <Widget>[
               const TMMicroLabelText('Profile picture'),
               const SizedBox(height: Space.md),
-              const SizedBox(height: 1, child: ColoredBox(color: AppColors.rule)),
+              const SizedBox(
+                height: 1,
+                child: ColoredBox(color: AppColors.rule),
+              ),
               const SizedBox(height: Space.lg),
               Text(
                 'Pick a picture from this device. It is held in memory for as '

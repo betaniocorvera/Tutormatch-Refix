@@ -207,6 +207,125 @@ class _TMTextFieldState extends State<TMTextField> {
   }
 }
 
+/// A single-select field for lists too long to draw as ballot rows. Same ruled
+/// surface, same 44 px target as [TMTextField]; the menu is the platform's own,
+/// which keeps keyboard and screen-reader behaviour intact.
+class TMDropdown<T> extends StatelessWidget {
+  const TMDropdown({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.labelOf,
+    required this.onChanged,
+    this.reason,
+    this.hint,
+    this.helper,
+    this.enabled = true,
+    super.key,
+  });
+
+  final String label;
+  final T? value;
+  final List<T> options;
+  final String Function(T) labelOf;
+  final ValueChanged<T> onChanged;
+  final String? reason;
+  final String? hint;
+  final String? helper;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color line = enabled ? AppColors.ruleStrong : AppColors.rule;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        TMFieldLabel(label: label, reason: reason),
+        const SizedBox(height: Space.sm),
+        Semantics(
+          label: label,
+          container: true,
+          child: InputDecorator(
+            isEmpty: value == null,
+            decoration: InputDecoration(
+              isDense: true,
+              filled: true,
+              fillColor:
+                  enabled ? AppColors.paperRaised : AppColors.paperSunken,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: Space.lg,
+                vertical: Space.sm,
+              ),
+              constraints: const BoxConstraints(minHeight: Hit.min),
+              border: OutlineInputBorder(
+                borderRadius: Radii.sharpAll,
+                borderSide: BorderSide(color: line),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: Radii.sharpAll,
+                borderSide: BorderSide(color: line),
+              ),
+              disabledBorder: OutlineInputBorder(
+                borderRadius: Radii.sharpAll,
+                borderSide: BorderSide(color: line),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderRadius: Radii.sharpAll,
+                borderSide: BorderSide(color: AppColors.ink, width: 2),
+              ),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<T>(
+                value: value,
+                isExpanded: true,
+                isDense: true,
+                menuMaxHeight: 320,
+                borderRadius: Radii.sharpAll,
+                dropdownColor: AppColors.paperRaised,
+                icon: TMIcon(
+                  TMIconName.chevronDown,
+                  size: 16,
+                  color: enabled ? AppColors.inkMuted : AppColors.rule,
+                ),
+                hint: hint == null
+                    ? null
+                    : Text(
+                        hint!,
+                        style: AppType.body.tone(AppColors.inkMuted),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                style: AppType.body,
+                onChanged: enabled
+                    ? (T? next) {
+                        if (next != null) onChanged(next);
+                      }
+                    : null,
+                items: <DropdownMenuItem<T>>[
+                  for (final T option in options)
+                    DropdownMenuItem<T>(
+                      value: option,
+                      child: Text(
+                        labelOf(option),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (helper != null) ...<Widget>[
+          const SizedBox(height: Space.sm),
+          Text(helper!, style: AppType.bodySmall.quieter),
+        ],
+      ],
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Choices
 // ─────────────────────────────────────────────────────────────────────────────

@@ -15,12 +15,16 @@
 //     would bring back. See TMEmptyState.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+import 'package:tutormatch/widgets/location_map.dart';
 import 'package:tutormatch/widgets/match_card.dart';
+import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
 import 'package:tutormatch/widgets/tm_empty_state.dart';
 import 'package:tutormatch/widgets/tm_field.dart';
@@ -40,6 +44,10 @@ class _MatchesScreenState extends State<MatchesScreen> {
   /// skeleton holds the card's exact proportions so nothing jumps when it does.
   bool _ranking = true;
   bool _railOpen = false;
+
+  /// List is the default because reasons are the product; the map is the second
+  /// reading of the same filtered set, never a replacement for the cards.
+  bool _mapView = false;
 
   /// Requests sent from this screen. In-memory, like everything else.
   final Set<String> _askedHere = <String>{};
@@ -205,6 +213,12 @@ class _MatchesScreenState extends State<MatchesScreen> {
               label: 'Up to \$${state.filters.maxRate}/hr',
               onRemove: () => state.filters = state.filters.copyWith(maxRate: 80),
             ),
+          if (state.filters.maxDistanceKm != null)
+            TMFilterTag(
+              label: 'Within ${state.filters.maxDistanceKm} km',
+              onRemove: () =>
+                  state.filters = state.filters.copyWith(clearDistance: true),
+            ),
           for (final String s in state.filters.subjects)
             TMFilterTag(
               label: s,
@@ -217,55 +231,95 @@ class _MatchesScreenState extends State<MatchesScreen> {
     }
 
     final List<MatchResult> results = outcome.results;
+
+    final Widget summary = _ResultSummary(results: results, total: ranked.length);
+    final Widget viewToggle = SizedBox(
+      width: 180,
+      child: TMSegmented<bool>(
+        options: const <bool>[false, true],
+        selected: _mapView,
+        onSelect: (bool map) => setState(() => _mapView = map),
+        labelOf: (bool map) => map ? 'Map' : 'List',
+      ),
+    );
+
+    final Widget header = TMLayout.isCompact(context)
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              summary,
+              const SizedBox(height: Space.md),
+              viewToggle,
+            ],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Expanded(child: summary),
+              const SizedBox(width: Space.lg),
+              viewToggle,
+            ],
+          );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        _ResultSummary(results: results, total: ranked.length),
+        header,
         SizedBox(height: Space.xl),
-        for (int i = 0; i < results.length; i++) ...<Widget>[
-          if (i > 0) SizedBox(height: Space.xl),
-          // After the fifth entry the reasons stop being about what you gain.
-          // Say so, rather than letting a long list quietly dilute itself.
-          if (i == 5 && results.length > 6) ...<Widget>[
-            const SizedBox(height: Space.xxl),
-            const Divider(height: 1),
-            const SizedBox(height: Space.lg),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 620),
-              child: Text(
-                'Below this line the reasons start to be about what you would be '
-                'giving up. They are still ranked honestly, and the reason is '
-                'still stated — read the third line of each one first.',
-                style: AppType.bodySmall.quieter,
-              ),
-            ),
-            const SizedBox(height: Space.xl),
-          ],
-          MatchResultCard(
-            result: results[i],
-            rank: i + 1,
-            total: ranked.length,
-            lead: i == 0,
-            fromProfile: state.profileAnswered,
-            profileSummary: state.profileSummary,
-            requested: _askedHere.contains(results[i].candidate.id) ||
-                state.conversations.any((Conversation chat) =>
-                    chat.counterpartId == results[i].candidate.id &&
-                    chat.status != RequestStatus.declined) ||
-                inbox.any((MatchRequest r) =>
-                    r.counterpartId == results[i].candidate.id &&
-                    r.status != RequestStatus.declined),
-            onOpen: () => Navigator.of(context).pushNamed(
+        if (_mapView)
+          _ResultsMap(
+            results: results,
+            onOpen: (MatchResult result) => Navigator.of(context).pushNamed(
               Routes.matchDetail,
-              arguments: results[i],
+              arguments: result,
             ),
-            onQuickRequest: () {
-              // A quick request is a request: it becomes a conversation, and
-              // the card says so from the same source the Messages screen reads.
-              state.startConversation(results[i].candidate);
-              setState(() => _askedHere.add(results[i].candidate.id));
-            },
-          ),
+          )
+        else ...<Widget>[
+          for (int i = 0; i < results.length; i++) ...<Widget>[
+            if (i > 0) SizedBox(height: Space.xl),
+            // After the fifth entry the reasons stop being about what you gain.
+            // Say so, rather than letting a long list quietly dilute itself.
+            if (i == 5 && results.length > 6) ...<Widget>[
+              const SizedBox(height: Space.xxl),
+              const Divider(height: 1),
+              const SizedBox(height: Space.lg),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 620),
+                child: Text(
+                  'Below this line the reasons start to be about what you would be '
+                  'giving up. They are still ranked honestly, and the reason is '
+                  'still stated — read the third line of each one first.',
+                  style: AppType.bodySmall.quieter,
+                ),
+              ),
+              const SizedBox(height: Space.xl),
+            ],
+            MatchResultCard(
+              result: results[i],
+              rank: i + 1,
+              total: ranked.length,
+              lead: i == 0,
+              fromProfile: state.profileAnswered,
+              profileSummary: state.profileSummary,
+              requested: _askedHere.contains(results[i].candidate.id) ||
+                  state.conversations.any((Conversation chat) =>
+                      chat.counterpartId == results[i].candidate.id &&
+                      chat.status != RequestStatus.declined) ||
+                  inbox.any((MatchRequest r) =>
+                      r.counterpartId == results[i].candidate.id &&
+                      r.status != RequestStatus.declined),
+              onOpen: () => Navigator.of(context).pushNamed(
+                Routes.matchDetail,
+                arguments: results[i],
+              ),
+              onQuickRequest: () {
+                // A quick request is a request: it becomes a conversation, and
+                // the card says so from the same source the Messages screen reads.
+                state.startConversation(results[i].candidate);
+                setState(() => _askedHere.add(results[i].candidate.id));
+              },
+            ),
+          ],
         ],
       ],
     );
@@ -353,6 +407,148 @@ class _ResultSummary extends StatelessWidget {
   }
 }
 
+class _ResultsMap extends StatelessWidget {
+  const _ResultsMap({required this.results, required this.onOpen});
+
+  final List<MatchResult> results;
+  final ValueChanged<MatchResult> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<MatchResult> mappable = <MatchResult>[
+      for (final MatchResult result in results)
+        if (result.candidate.publicPlace != null) result,
+    ];
+    final int hidden = results.length - mappable.length;
+
+    if (mappable.isEmpty) {
+      return TMEntry(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const TMIcon(TMIconName.map, size: 20, color: AppColors.inkMuted),
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text('No areas to map.', style: AppType.name),
+                  const SizedBox(height: Space.xs),
+                  Text(
+                    'Everyone in these results hides their location. Their '
+                    'cards are still in the list, with every other fact intact.',
+                    style: AppType.bodySmall.quieter,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final List<LocationPin> pins = _fanOut(mappable);
+    final String hiddenNote = hidden == 0
+        ? ''
+        : ' $hidden ${hidden == 1 ? 'person is' : 'people are'} not shown '
+            'because their area is hidden.';
+    final String note = 'Circles are approximate 1–2 km areas, not addresses. '
+        'Tap a face to open their profile.$hiddenNote';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        LocationMap(
+          centerLatitude: pins.first.latitude,
+          centerLongitude: pins.first.longitude,
+          height: TMLayout.isWide(context) ? 540 : 420,
+          pins: pins,
+          fitPins: true,
+          showCenterCircle: false,
+          showPinCircles: true,
+          interactive: true,
+          fallbackTitle: 'Approximate areas',
+          fallbackNote:
+              '${pins.length} ${pins.length == 1 ? 'person' : 'people'} · '
+              'details stay in the list',
+          semanticLabel:
+              'Map of ${pins.length} approximate areas. Tap a person to open '
+              'their profile. $note',
+        ),
+        const SizedBox(height: Space.sm),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: TMIcon(
+                TMIconName.map,
+                size: 14,
+                color: AppColors.inkMuted,
+              ),
+            ),
+            const SizedBox(width: Space.sm),
+            Expanded(child: Text(note, style: AppType.bodySmall.quieter)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// People can share a neighbourhood, and city-only people share a centre.
+  /// Fan the pins into a small ring so every face stays tappable; the area
+  /// circle, not the pin, is the claim about where they are.
+  List<LocationPin> _fanOut(List<MatchResult> members) {
+    final Map<String, List<MatchResult>> groups = <String, List<MatchResult>>{};
+    for (final MatchResult result in members) {
+      final PublicPlace place = result.candidate.publicPlace!;
+      final String key =
+          '${place.latitude.toStringAsFixed(4)}|${place.longitude.toStringAsFixed(4)}';
+      groups.putIfAbsent(key, () => <MatchResult>[]).add(result);
+    }
+
+    final List<LocationPin> pins = <LocationPin>[];
+    for (final List<MatchResult> group in groups.values) {
+      for (int i = 0; i < group.length; i++) {
+        final MatchResult result = group[i];
+        final PublicPlace place = result.candidate.publicPlace!;
+        double latitude = place.latitude;
+        double longitude = place.longitude;
+        if (group.length > 1) {
+          final double angle = 2 * math.pi * i / group.length;
+          const double spread = 0.0045;
+          final double cosLat = math
+              .cos(place.latitude * math.pi / 180)
+              .abs()
+              .clamp(0.2, 1.0)
+              .toDouble();
+          latitude += spread * math.sin(angle);
+          longitude += spread * math.cos(angle) / cosLat;
+        }
+        final String? distance = result.distanceKm == null
+            ? null
+            : describeDistance(result.distanceKm!);
+        pins.add(
+          LocationPin(
+            latitude: latitude,
+            longitude: longitude,
+            child: TMAvatar(
+              result.candidate.name,
+              size: 40,
+              tint: result.candidate.photoTint,
+            ),
+            semanticLabel: 'Open ${result.candidate.name}\'s profile. '
+                '${place.label}'
+                '${distance == null ? '' : ', $distance'}.',
+            onTap: () => onOpen(result),
+          ),
+        );
+      }
+    }
+    return pins;
+  }
+}
+
 class _ProfileBasis extends StatelessWidget {
   const _ProfileBasis({required this.summary});
   final String summary;
@@ -397,32 +593,42 @@ class _AccountTrailing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        // A name is the one unbounded piece of user text in this bar, so it gets
-        // a cap and an ellipsis: a forty-character name shortens itself instead
-        // of pushing the navigation off the edge.
-        Flexible(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 200),
-            child: Text(
-              '$name · ${role == Role.student ? 'Student' : 'Tutor'}',
-              style: AppType.bodySmall.quieter,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+    // The name is the first thing to go when the top bar's right-hand side is
+    // tight. "Sign out" is the action; the name is repeated on the page.
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool showName =
+            !constraints.hasBoundedWidth || constraints.maxWidth >= 210;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (showName) ...<Widget>[
+              // A name is the one unbounded piece of user text in this bar, so
+              // it gets a cap and an ellipsis: a forty-character name shortens
+              // itself instead of pushing the navigation off the edge.
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  child: Text(
+                    '$name · ${role == Role.student ? 'Student' : 'Tutor'}',
+                    style: AppType.bodySmall.quieter,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: Space.sm),
+            ],
+            TMButton(
+              label: 'Sign out',
+              variant: TMButtonVariant.quiet,
+              minHeight: Hit.min,
+              onPressed: () => Navigator.of(context)
+                  .popUntil((Route<void> route) => route.isFirst),
             ),
-          ),
-        ),
-        const SizedBox(width: Space.sm),
-        TMButton(
-          label: 'Sign out',
-          variant: TMButtonVariant.quiet,
-          minHeight: Hit.min,
-          onPressed: () => Navigator.of(context)
-              .popUntil((Route<void> route) => route.isFirst),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -523,6 +729,29 @@ class _FilterRail extends StatelessWidget {
               ? f.copyWith(clearMode: true, mode: null)
               : f.copyWith(mode: m),
           labelOf: (SessionMode? m) => m == null ? anyFormat : m.label,
+        ),
+        const SizedBox(height: Space.xl),
+
+        const TMMicroLabelText('Distance'),
+        const SizedBox(height: Space.md),
+        TMTagRow<int?>(
+          options: const <int?>[null, 5, 10, 25],
+          selected: f.maxDistanceKm,
+          onSelect: (int? km) => state.filters = km == null
+              ? f.copyWith(clearDistance: true, maxDistanceKm: null)
+              : f.copyWith(maxDistanceKm: km),
+          labelOf: (int? km) => km == null ? 'Any distance' : 'Within $km km',
+        ),
+        const SizedBox(height: Space.sm),
+        Text(
+          state.profile.publicPlace == null
+              ? 'Your own area is hidden or not set, so there is nothing to '
+                  'measure from. Choose an area or change your privacy setting '
+                  'in Profile to use this filter.'
+              : 'Measured from your approximate area; distances are shown '
+                  'rounded to the nearest kilometre. A city-only area is '
+                  'measured from its centre; a hidden area cannot be measured.',
+          style: AppType.bodySmall.quieter,
         ),
         const SizedBox(height: Space.xl),
 

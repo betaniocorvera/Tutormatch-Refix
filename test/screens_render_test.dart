@@ -37,6 +37,7 @@ import 'package:tutormatch/screens/register_screen.dart';
 import 'package:tutormatch/screens/requests_screen.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+import 'package:tutormatch/widgets/location_map.dart';
 
 /// A valid, opaque 1×1 red PNG: what the picker would hand to app state.
 final Uint8List _redDot = base64Decode(
@@ -57,6 +58,8 @@ void main() {
   // fact comfortable. Loading them here means the numbers below are the numbers
   // the browser will lay out.
   setUpAll(_loadBundledFonts);
+  setUp(() => debugLoadMapTiles = false);
+  tearDown(() => debugLoadMapTiles = true);
 
   /// Renders one screen at one width in the app's real theme and state scope.
   ///

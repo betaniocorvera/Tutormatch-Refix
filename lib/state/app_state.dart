@@ -27,6 +27,13 @@ class AppState extends ChangeNotifier {
   set role(Role value) {
     if (value == _role) return;
     _role = value;
+    // A role switch must not leave the other side's profile behind: a tutor
+    // signing in with a student-shaped profile would see student-only fields
+    // (and another person's saved area). If the profile already belongs to the
+    // chosen side, keep it; otherwise start from that side's demo profile.
+    if (_profile.role != value) {
+      _profile = value == Role.student ? demoStudentProfile : demoTutorProfile;
+    }
     notifyListeners();
   }
 

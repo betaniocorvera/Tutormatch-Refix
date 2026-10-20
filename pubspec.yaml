@@ -35,6 +35,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   image_picker: ^1.2.4
+  flutter_map: ^8.3.2
 
   # No font package. The two faces this product is set in are bundled, below:
   # shipping them is smaller than the packages that fetch them, they render on

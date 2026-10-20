@@ -65,11 +65,18 @@ void main() {
     test('every match can state three reasons, best fit first', () {
       for (final MatchResult r in rank(sampleTutors, demoStudentProfile)) {
         expect(r.reasons.length, 3);
-        final List<double> fits = r.reasons
+        // "Nearby" is a fact about the pair, not one of the five scored
+        // dimensions, so it is exempt from the fit-ordering check. The two
+        // scoring reasons above it must still be in order.
+        final List<FitNote> fitted = r.reasons
+            .where((FitNote n) => n.label != 'Nearby')
+            .toList();
+        final List<double> fits = fitted
             .map((FitNote n) => r.score.byDimension[n.dimension]! / n.dimension.max)
             .toList();
-        expect(fits[0], greaterThanOrEqualTo(fits[1]));
-        expect(fits[1], greaterThanOrEqualTo(fits[2]));
+        for (int i = 1; i < fits.length; i++) {
+          expect(fits[i - 1], greaterThanOrEqualTo(fits[i]));
+        }
       }
     });
 

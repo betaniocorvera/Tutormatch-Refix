@@ -845,6 +845,8 @@ class _ChatHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final Conversation c = conversation;
     final bool accepted = c.status == RequestStatus.accepted;
+    final PublicPlace? counterpartPlace =
+        candidateById(c.counterpartId)?.publicPlace;
     // The status pill is redundant once an accepted thread is open, and on a
     // phone the two call buttons are worth more than the label.
     final bool showPill = !accepted || !TMLayout.isCompact(context);
@@ -894,6 +896,27 @@ class _ChatHeader extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (counterpartPlace != null) ...<Widget>[
+                        const SizedBox(height: 1),
+                        Row(
+                          children: <Widget>[
+                            const TMIcon(
+                              TMIconName.pin,
+                              size: 11,
+                              color: AppColors.inkMuted,
+                            ),
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Text(
+                                counterpartPlace.label,
+                                style: AppType.micro.tone(AppColors.inkMuted),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),

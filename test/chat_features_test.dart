@@ -7,9 +7,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/screens/chat_screen.dart';
@@ -46,6 +46,7 @@ Future<void> _pumpChat(
 }
 
 void main() {
+  setUpAll(_loadBundledFonts);
   testWidgets('a photo, a voice note and a proposal land as their own kinds',
       (WidgetTester tester) async {
     final AppState state = AppState();
@@ -178,6 +179,7 @@ void main() {
     await tester.enterText(find.byType(TextField), 'See you ');
     await tester.pump();
     await tester.tap(find.byTooltip('Insert an emoji'));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('😀'));
     await tester.pump();
@@ -216,4 +218,28 @@ void main() {
     expect(find.byTooltip('Start a video call'), findsNothing);
     expect(find.textContaining('Waiting for Liang to accept'), findsOneWidget);
   });
+}
+
+/// Registers the bundled faces under the names the theme asks for.
+Future<void> _loadBundledFonts() async {
+  Future<void> family(String name, List<String> assets) async {
+    final FontLoader loader = FontLoader(name);
+    for (final String asset in assets) {
+      loader.addFont(rootBundle.load(asset));
+    }
+    await loader.load();
+  }
+
+  await family('Bricolage Grotesque', <String>[
+    'assets/fonts/BricolageGrotesque-Variable.ttf',
+  ]);
+  await family('Figtree', <String>['assets/fonts/Figtree-Variable.ttf']);
+  await family('IBM Plex Mono', <String>[
+    'assets/fonts/IBMPlexMono-Regular.ttf',
+    'assets/fonts/IBMPlexMono-Medium.ttf',
+  ]);
+  await family('PhosphorRegular', <String>[
+    'assets/fonts/PhosphorRegular.ttf',
+  ]);
+  await family('PhosphorBold', <String>['assets/fonts/PhosphorBold.ttf']);
 }

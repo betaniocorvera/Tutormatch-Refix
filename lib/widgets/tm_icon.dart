@@ -1,16 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // The icon set.
 //
-// Authored, not imported: every glyph is a set of straight or arced strokes on
-// a 24-unit grid, drawn at 1.5 units, with square caps and mitred joins so they
-// carry the same weight as the hairline rules the rest of the product is built
-// from. Material's rounded 24 px set belongs to a different world, and an emoji
-// is not an icon.
+// Phosphor, not Material and never an emoji: one authored family with a
+// consistent optical weight, a 24-unit grid and rounded terminals that sit well
+// beside the product's 12 px corners. The enum is the public API — screens name
+// a job ("sliders", "pin"), never a package glyph — so the drawing can change
+// behind it without touching a screen.
 //
-// Deliberately tiny. The original nine are still here; the chat added the
-// controls a conversation needs — a phone, a camera, a microphone, a picture,
-// a calendar, a play mark — drawn to the same grid and the same weight so they
-// do not arrive as a second visual language.
+// Weight is chosen once: the regular cut for normal UI, the bold cut when a
+// caller asks for 2 px or more (the small marks inside status pills). Icons are
+// decorative here; the text beside them carries the meaning.
+//
+// The glyphs come from the Phosphor font bundled in `assets/fonts`, drawn with
+// Flutter's own Icon widget. The official package's Dart wrapper subclasses
+// IconData, which Flutter 3.44 made final; the font asset is version-independent,
+// so the codepoints are declared here as plain IconData. Same font, same cuts.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/widgets.dart';
@@ -45,6 +49,29 @@ enum TMIconName {
   plus,
   speaker,
   speakerOff,
+
+  // Navigation and matching.
+  search,
+  target,
+  chat,
+  user,
+  send,
+  sparkle,
+  clock,
+  warning,
+  refresh,
+  star,
+  dots,
+  compass,
+  eye,
+  eyeOff,
+  book,
+  graduation,
+  teach,
+  wallet,
+  inbox,
+  chats,
+  briefcase,
 }
 
 class TMIcon extends StatelessWidget {
@@ -59,14 +86,218 @@ class TMIcon extends StatelessWidget {
   final TMIconName name;
   final double size;
   final Color color;
+
+  /// Kept for API compatibility. Phosphor's cuts are fixed at 16/24 units; a
+  /// value of 2 or more selects the bold cut, everything else the regular one.
   final double strokeWidth;
+
+  static const Map<TMIconName, (IconData regular, IconData bold)> _glyphs =
+      <TMIconName, (IconData, IconData)>{
+    TMIconName.arrowRight: (
+      IconData(0xe06c, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe06c, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.arrowLeft: (
+      IconData(0xe058, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe058, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.check: (
+      IconData(0xe182, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe182, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.cross: (
+      IconData(0xe4f6, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe4f6, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.dash: (
+      IconData(0xe32a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe32a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.chevronDown: (
+      IconData(0xe136, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe136, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.menu: (
+      IconData(0xe2f0, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe2f0, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.close: (
+      IconData(0xe4f6, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe4f6, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.sliders: (
+      IconData(0xe434, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe434, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.pin: (
+      IconData(0xe316, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe316, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.map: (
+      IconData(0xe31a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe31a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.phone: (
+      IconData(0xe3b8, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe3b8, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.phoneDown: (
+      IconData(0xe3bc, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe3bc, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.video: (
+      IconData(0xe4da, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe4da, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.videoOff: (
+      IconData(0xe4dc, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe4dc, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.cameraFlip: (
+      IconData(0xe7a4, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe7a4, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.mic: (
+      IconData(0xe326, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe326, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.micOff: (
+      IconData(0xe328, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe328, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.image: (
+      IconData(0xe2ca, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe2ca, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.calendar: (
+      IconData(0xe10a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe10a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.emoji: (
+      IconData(0xe436, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe436, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.play: (
+      IconData(0xe3d0, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe3d0, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.pause: (
+      IconData(0xe39e, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe39e, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.plus: (
+      IconData(0xe3d4, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe3d4, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.speaker: (
+      IconData(0xe44a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe44a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.speakerOff: (
+      IconData(0xe45a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe45a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.search: (
+      IconData(0xe30c, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe30c, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.target: (
+      IconData(0xe47c, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe47c, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.chat: (
+      IconData(0xe168, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe168, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.user: (
+      IconData(0xe4c4, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe4c4, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.send: (
+      IconData(0xe398, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe398, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.sparkle: (
+      IconData(0xe6a2, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe6a2, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.clock: (
+      IconData(0xe19a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe19a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.warning: (
+      IconData(0xe4e2, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe4e2, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.refresh: (
+      IconData(0xe094, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe094, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.star: (
+      IconData(0xe46a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe46a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.dots: (
+      IconData(0xe1fe, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe1fe, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.compass: (
+      IconData(0xe1c8, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe1c8, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.eye: (
+      IconData(0xe220, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe220, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.eyeOff: (
+      IconData(0xe224, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe224, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.book: (
+      IconData(0xe0e6, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe0e6, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.graduation: (
+      IconData(0xe62c, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe62c, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.teach: (
+      IconData(0xe600, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe600, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.wallet: (
+      IconData(0xe68a, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe68a, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.inbox: (
+      IconData(0xe4aa, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe4aa, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.chats: (
+      IconData(0xe17c, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe17c, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+    TMIconName.briefcase: (
+      IconData(0xe0ee, fontFamily: 'PhosphorRegular', matchTextDirection: true),
+      IconData(0xe0ee, fontFamily: 'PhosphorBold', matchTextDirection: true),
+    ),
+  };
+
+  IconData get _glyph {
+    final (IconData regular, IconData bold) = _glyphs[name]!;
+    return strokeWidth >= 2 ? bold : regular;
+  }
 
   @override
   Widget build(BuildContext context) {
     return SizedBox.square(
       dimension: size,
-      child: CustomPaint(
-        painter: _TMIconPainter(name, color, strokeWidth * (size / 24)),
+      child: Center(
+        child: Icon(
+          _glyph,
+          size: size,
+          color: color,
+        ),
       ),
     );
   }
@@ -92,336 +323,9 @@ class TMRotatingIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedRotation(
       turns: turns,
-      duration: Motion.base,
+      duration: Motion.respect(context, Motion.base),
       curve: Motion.ease,
       child: TMIcon(name, size: size, color: color),
     );
   }
 }
-
-class _TMIconPainter extends CustomPainter {
-  _TMIconPainter(this.name, this.color, this.width);
-
-  final TMIconName name;
-  final Color color;
-  final double width;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double s = size.width / 24;
-    final Paint p = Paint()
-      ..color = color
-      ..strokeWidth = width.clamp(1.2, 2.4)
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.square
-      ..strokeJoin = StrokeJoin.miter;
-    final Paint fill = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    Offset at(double x, double y) => Offset(x * s, y * s);
-
-    switch (name) {
-      case TMIconName.arrowRight:
-        canvas.drawLine(at(3, 12), at(20, 12), p);
-        canvas.drawLine(at(13.5, 5.5), at(20, 12), p);
-        canvas.drawLine(at(13.5, 18.5), at(20, 12), p);
-
-      case TMIconName.arrowLeft:
-        canvas.drawLine(at(21, 12), at(4, 12), p);
-        canvas.drawLine(at(10.5, 5.5), at(4, 12), p);
-        canvas.drawLine(at(10.5, 18.5), at(4, 12), p);
-
-      case TMIconName.check:
-        canvas.drawLine(at(4, 12.5), at(9.75, 18.25), p);
-        canvas.drawLine(at(9.75, 18.25), at(20, 5.75), p);
-
-      case TMIconName.cross:
-        canvas.drawLine(at(5.5, 5.5), at(18.5, 18.5), p);
-        canvas.drawLine(at(18.5, 5.5), at(5.5, 18.5), p);
-
-      case TMIconName.dash:
-        canvas.drawLine(at(5, 12), at(19, 12), p);
-
-      case TMIconName.chevronDown:
-        canvas.drawLine(at(5.5, 9.25), at(12, 15.75), p);
-        canvas.drawLine(at(12, 15.75), at(18.5, 9.25), p);
-
-      case TMIconName.menu:
-        for (final double y in <double>[7, 12, 17]) {
-          canvas.drawLine(at(3.5, y), at(20.5, y), p);
-        }
-
-      case TMIconName.close:
-        canvas.drawLine(at(5, 5), at(19, 19), p);
-        canvas.drawLine(at(19, 5), at(5, 19), p);
-
-      case TMIconName.sliders:
-        // Two rules with a handle on each: the universal filter mark, drawn to
-        // the same stroke weight as every other rule in the product.
-        canvas.drawLine(at(3.5, 8), at(20.5, 8), p);
-        canvas.drawLine(at(3.5, 16), at(20.5, 16), p);
-        canvas.drawRect(Rect.fromCenter(center: at(9, 8), width: 4.5 * s, height: 7 * s), p);
-        canvas.drawRect(Rect.fromCenter(center: at(15.5, 16), width: 4.5 * s, height: 7 * s), p);
-
-      case TMIconName.pin:
-        // A location mark, not a house: a teardrop with a hollow centre. The
-        // product never knows where a house is, so the icon does not draw one.
-        canvas.drawPath(
-          Path()
-            ..moveTo(12 * s, 21 * s)
-            ..cubicTo(12 * s, 21 * s, 5 * s, 14.5 * s, 5 * s, 9.5 * s)
-            ..cubicTo(5 * s, 5.6 * s, 8.1 * s, 3 * s, 12 * s, 3 * s)
-            ..cubicTo(15.9 * s, 3 * s, 19 * s, 5.6 * s, 19 * s, 9.5 * s)
-            ..cubicTo(19 * s, 14.5 * s, 12 * s, 21 * s, 12 * s, 21 * s)
-            ..close(),
-          p,
-        );
-        canvas.drawCircle(at(12, 9.5), 2.4 * s, p);
-
-      case TMIconName.map:
-        canvas.drawPath(
-          Path()
-            ..moveTo(3.5 * s, 6 * s)
-            ..lineTo(9 * s, 4 * s)
-            ..lineTo(15 * s, 6 * s)
-            ..lineTo(20.5 * s, 4 * s)
-            ..lineTo(20.5 * s, 18 * s)
-            ..lineTo(15 * s, 20 * s)
-            ..lineTo(9 * s, 18 * s)
-            ..lineTo(3.5 * s, 20 * s)
-            ..close(),
-          p,
-        );
-        canvas.drawLine(at(9, 4), at(9, 18), p);
-        canvas.drawLine(at(15, 6), at(15, 20), p);
-
-      case TMIconName.phone:
-        canvas.drawPath(_phoneOutline(s), p);
-
-      case TMIconName.phoneDown:
-        // The same receiver, turned 135°: the one gesture everybody already
-        // reads as "end this".
-        canvas.save();
-        canvas.translate(12 * s, 12 * s);
-        canvas.rotate(2.356194490192345);
-        canvas.translate(-12 * s, -12 * s);
-        canvas.drawPath(_phoneOutline(s), p);
-        canvas.restore();
-
-      case TMIconName.video:
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(3.5 * s, 7 * s, 11.5 * s, 10 * s),
-            Radius.circular(1.5 * s),
-          ),
-          p,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(16 * s, 10.5 * s)
-            ..lineTo(20.5 * s, 8 * s)
-            ..lineTo(20.5 * s, 16 * s)
-            ..lineTo(16 * s, 13.5 * s)
-            ..close(),
-          p,
-        );
-
-      case TMIconName.videoOff:
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(3.5 * s, 7 * s, 11.5 * s, 10 * s),
-            Radius.circular(1.5 * s),
-          ),
-          p,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(16 * s, 10.5 * s)
-            ..lineTo(20.5 * s, 8 * s)
-            ..lineTo(20.5 * s, 16 * s)
-            ..lineTo(16 * s, 13.5 * s)
-            ..close(),
-          p,
-        );
-        canvas.drawLine(at(4, 4), at(20, 20), p);
-
-      case TMIconName.cameraFlip:
-        // Two arrows going opposite ways: swap which way the camera looks.
-        canvas.drawLine(at(3.5, 9), at(16.5, 9), p);
-        canvas.drawLine(at(13.5, 6), at(16.5, 9), p);
-        canvas.drawLine(at(13.5, 12), at(16.5, 9), p);
-        canvas.drawLine(at(20.5, 15), at(7.5, 15), p);
-        canvas.drawLine(at(10.5, 12), at(7.5, 15), p);
-        canvas.drawLine(at(10.5, 18), at(7.5, 15), p);
-
-      case TMIconName.mic:
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromCenter(center: at(12, 9.25), width: 5.5 * s, height: 10.5 * s),
-            Radius.circular(2.75 * s),
-          ),
-          p,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(6.5 * s, 11 * s)
-            ..cubicTo(6.5 * s, 15.2 * s, 9 * s, 17.5 * s, 12 * s, 17.5 * s)
-            ..cubicTo(15 * s, 17.5 * s, 17.5 * s, 15.2 * s, 17.5 * s, 11 * s),
-          p,
-        );
-        canvas.drawLine(at(12, 17.5), at(12, 21), p);
-        canvas.drawLine(at(8.5, 21), at(15.5, 21), p);
-
-      case TMIconName.micOff:
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromCenter(center: at(12, 9.25), width: 5.5 * s, height: 10.5 * s),
-            Radius.circular(2.75 * s),
-          ),
-          p,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(6.5 * s, 11 * s)
-            ..cubicTo(6.5 * s, 15.2 * s, 9 * s, 17.5 * s, 12 * s, 17.5 * s)
-            ..cubicTo(15 * s, 17.5 * s, 17.5 * s, 15.2 * s, 17.5 * s, 11 * s),
-          p,
-        );
-        canvas.drawLine(at(12, 17.5), at(12, 21), p);
-        canvas.drawLine(at(8.5, 21), at(15.5, 21), p);
-        canvas.drawLine(at(4, 4), at(20, 20), p);
-
-      case TMIconName.image:
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(3.5 * s, 4.5 * s, 17 * s, 15 * s),
-            Radius.circular(1.5 * s),
-          ),
-          p,
-        );
-        canvas.drawPath(
-          Path()
-            ..moveTo(4.5 * s, 17.5 * s)
-            ..lineTo(9 * s, 12 * s)
-            ..lineTo(12.5 * s, 15.5 * s)
-            ..lineTo(15 * s, 13 * s)
-            ..lineTo(19.5 * s, 17.5 * s),
-          p,
-        );
-        canvas.drawCircle(at(16, 8.5), 1.4 * s, fill);
-
-      case TMIconName.calendar:
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromLTWH(3.5 * s, 5.5 * s, 17 * s, 15 * s),
-            Radius.circular(1.5 * s),
-          ),
-          p,
-        );
-        canvas.drawLine(at(3.5, 10.5), at(20.5, 10.5), p);
-        canvas.drawLine(at(8, 3.5), at(8, 7.5), p);
-        canvas.drawLine(at(16, 3.5), at(16, 7.5), p);
-
-      case TMIconName.emoji:
-        canvas.drawCircle(at(12, 12), 8.5 * s, p);
-        canvas.drawCircle(at(9.25, 9.75), 0.9 * s, fill);
-        canvas.drawCircle(at(14.75, 9.75), 0.9 * s, fill);
-        canvas.drawPath(
-          Path()
-            ..moveTo(8.25 * s, 14 * s)
-            ..quadraticBezierTo(12 * s, 17.5 * s, 15.75 * s, 14 * s),
-          p,
-        );
-
-      case TMIconName.play:
-        canvas.drawPath(
-          Path()
-            ..moveTo(8 * s, 5 * s)
-            ..lineTo(19 * s, 12 * s)
-            ..lineTo(8 * s, 19 * s)
-            ..close(),
-          fill,
-        );
-
-      case TMIconName.pause:
-        canvas.drawRect(Rect.fromLTWH(8 * s, 5.5 * s, 3 * s, 13 * s), fill);
-        canvas.drawRect(Rect.fromLTWH(13 * s, 5.5 * s, 3 * s, 13 * s), fill);
-
-      case TMIconName.plus:
-        canvas.drawLine(at(12, 4.5), at(12, 19.5), p);
-        canvas.drawLine(at(4.5, 12), at(19.5, 12), p);
-
-      case TMIconName.speaker:
-        canvas.drawPath(
-          Path()
-            ..moveTo(4 * s, 9.5 * s)
-            ..lineTo(8 * s, 9.5 * s)
-            ..lineTo(12.5 * s, 5 * s)
-            ..lineTo(12.5 * s, 19 * s)
-            ..lineTo(8 * s, 14.5 * s)
-            ..lineTo(4 * s, 14.5 * s)
-            ..close(),
-          p,
-        );
-        canvas.drawArc(
-          Rect.fromCircle(center: at(13, 12), radius: 5 * s),
-          -0.7853981633974483,
-          1.5707963267948966,
-          false,
-          p,
-        );
-        canvas.drawArc(
-          Rect.fromCircle(center: at(13, 12), radius: 8.5 * s),
-          -0.7853981633974483,
-          1.5707963267948966,
-          false,
-          p,
-        );
-
-      case TMIconName.speakerOff:
-        canvas.drawPath(
-          Path()
-            ..moveTo(4 * s, 9.5 * s)
-            ..lineTo(8 * s, 9.5 * s)
-            ..lineTo(12.5 * s, 5 * s)
-            ..lineTo(12.5 * s, 19 * s)
-            ..lineTo(8 * s, 14.5 * s)
-            ..lineTo(4 * s, 14.5 * s)
-            ..close(),
-          p,
-        );
-        canvas.drawArc(
-          Rect.fromCircle(center: at(13, 12), radius: 5 * s),
-          -0.7853981633974483,
-          1.5707963267948966,
-          false,
-          p,
-        );
-        canvas.drawLine(at(4, 4), at(20, 20), p);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_TMIconPainter old) =>
-      old.name != name || old.color != color || old.width != width;
-}
-
-/// The receiver, drawn as one outline on the 24-unit grid. Shared by the
-/// ringing phone and the one that puts it down.
-Path _phoneOutline(double s) => Path()
-  ..moveTo(6.62 * s, 10.79 * s)
-  ..cubicTo(8.06 * s, 13.62 * s, 10.38 * s, 15.94 * s, 13.21 * s, 17.38 * s)
-  ..lineTo(15.41 * s, 15.18 * s)
-  ..cubicTo(15.68 * s, 14.91 * s, 16.08 * s, 14.82 * s, 16.43 * s, 14.94 * s)
-  ..cubicTo(17.55 * s, 15.31 * s, 18.76 * s, 15.51 * s, 20 * s, 15.51 * s)
-  ..cubicTo(20.55 * s, 15.51 * s, 21 * s, 15.96 * s, 21 * s, 16.51 * s)
-  ..lineTo(21 * s, 20 * s)
-  ..cubicTo(21 * s, 20.55 * s, 20.55 * s, 21 * s, 20 * s, 21 * s)
-  ..cubicTo(10.61 * s, 21 * s, 3 * s, 13.39 * s, 3 * s, 4 * s)
-  ..cubicTo(3 * s, 3.45 * s, 3.45 * s, 3 * s, 4 * s, 3 * s)
-  ..lineTo(7.5 * s, 3 * s)
-  ..cubicTo(8.05 * s, 3 * s, 8.5 * s, 3.45 * s, 8.5 * s, 4 * s)
-  ..cubicTo(8.5 * s, 5.25 * s, 8.7 * s, 6.45 * s, 9.07 * s, 7.57 * s)
-  ..cubicTo(9.18 * s, 7.92 * s, 9.1 * s, 8.31 * s, 8.82 * s, 8.59 * s)
-  ..close();

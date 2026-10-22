@@ -26,8 +26,10 @@ import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/availability_grid.dart';
+import 'package:tutormatch/widgets/flip_card.dart';
 import 'package:tutormatch/widgets/location_map.dart';
 import 'package:tutormatch/widgets/person_profile.dart';
+import 'package:tutormatch/widgets/tilt_card.dart';
 import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
 import 'package:tutormatch/widgets/tm_field.dart';
@@ -48,6 +50,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// are copied into the draft when editing begins and only reach app state on
   /// Save.
   bool _editing = false;
+
+  /// The small in-page preview turns on its own axis; the full preview route
+  /// stays exactly where it was, this is only a second reading beside the form.
+  bool _previewFlipped = false;
 
   late final TextEditingController _name;
   late final TextEditingController _statusText;
@@ -112,8 +118,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ],
       navTrailing: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
+          // The rail footer is 216 px wide after its padding: enough for the
+          // action, not for a name and a role as well. Only show the account
+          // line in the top bar, where there is room to read it.
           final bool showName =
-              !constraints.hasBoundedWidth || constraints.maxWidth >= 210;
+              !constraints.hasBoundedWidth || constraints.maxWidth >= 320;
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -146,7 +155,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const SizedBox(height: Space.xxl),
           Text('Your profile', style: AppType.pageTitle),
           const SizedBox(height: Space.lg),
           ConstrainedBox(
@@ -161,7 +169,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(height: Space.xxl),
-          _identity(context, state),
+          TiltCard(
+            maxTilt: 3,
+            lift: 3,
+            child: _identity(context, state),
+          ),
           SizedBox(height: Space.band(TMLayout.widthOf(context))),
           if (wide)
             Row(
@@ -236,86 +248,96 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (p.publicPlace != null) p.publicPlace!.label,
     ];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            _AvatarControl(
-              name: name,
-              photo: state.photo,
-              caption: state.photo == null ? 'Add a picture' : 'Change picture',
-              onTap: _openPictureSheet,
-            ),
-            const SizedBox(width: Space.xl),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Wrap(
-                    spacing: Space.md,
-                    runSpacing: Space.sm,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: <Widget>[
-                      Text(name, style: AppType.titleLarge),
-                      Text(
-                        p.role == Role.student ? 'Student' : 'Tutor',
-                        style: AppType.micro.tone(AppColors.inkMuted),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: Space.sm),
-                  PersonStatusLine(
-                    presence: p.presence,
-                    statusText: p.statusText,
-                  ),
-                  const SizedBox(height: Space.sm),
-                  Text(
-                    meta.isEmpty
-                        ? 'Add where you live and when you were born — people look for both before they write.'
-                        : meta.join(' · '),
-                    style: AppType.bodySmall.quieter,
-                  ),
-                  const SizedBox(height: Space.lg),
-                  Wrap(
-                    spacing: Space.md,
-                    runSpacing: Space.xs,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: <Widget>[
-                      const TMMicroLabelText('Profile completeness'),
-                      Text('$filled of ${gaps.length}', style: AppType.figure),
-                    ],
-                  ),
-                  const SizedBox(height: Space.sm),
-                  SizedBox(
-                    width: 220,
-                    child: _Track(
-                      fraction: gaps.isEmpty ? 0 : filled / gaps.length,
+    final bool compact = TMLayout.isCompact(context);
+
+    return TMEntry(
+      padding: EdgeInsets.all(compact ? Space.lg : Space.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _AvatarControl(
+                name: name,
+                photo: state.photo,
+                caption: state.photo == null ? 'Add a picture' : 'Change picture',
+                onTap: _openPictureSheet,
+              ),
+              const SizedBox(width: Space.xl),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Wrap(
+                      spacing: Space.md,
+                      runSpacing: Space.sm,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        Text(name, style: AppType.titleLarge),
+                        Text(
+                          p.role == Role.student ? 'Student' : 'Tutor',
+                          style: AppType.micro.tone(AppColors.inkMuted),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: Space.sm),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 420),
-                    child: Text(
-                      missing.isEmpty
-                          ? 'Every field a profile can answer is answered.'
-                          : 'Still missing: ${missing.join(', ')}.',
+                    const SizedBox(height: Space.sm),
+                    PersonStatusLine(
+                      presence: p.presence,
+                      statusText: p.statusText,
+                    ),
+                    const SizedBox(height: Space.sm),
+                    Text(
+                      meta.isEmpty
+                          ? 'Add where you live and when you were born — people look for both before they write.'
+                          : meta.join(' · '),
                       style: AppType.bodySmall.quieter,
                     ),
-                  ),
-                ],
+                    const SizedBox(height: Space.lg),
+                    Wrap(
+                      spacing: Space.md,
+                      runSpacing: Space.xs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        const TMMicroLabelText('Profile completeness'),
+                        Text(
+                          '$filled of ${gaps.length}',
+                          style: AppType.figure.tone(AppColors.ink),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: Space.sm),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 280),
+                      child: _Track(
+                        fraction: gaps.isEmpty ? 0 : filled / gaps.length,
+                      ),
+                    ),
+                    const SizedBox(height: Space.sm),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: Text(
+                        missing.isEmpty
+                            ? 'Every field a profile can answer is answered.'
+                            : 'Still missing: ${missing.join(', ')}.',
+                        style: AppType.bodySmall.quieter,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: Space.xl),
-        Wrap(
-          spacing: Space.md,
-          runSpacing: Space.sm,
-          children: _actions(context, state),
-        ),
-      ],
+            ],
+          ),
+          const SizedBox(height: Space.lg),
+          const SizedBox(height: 1, child: ColoredBox(color: AppColors.rule)),
+          const SizedBox(height: Space.md),
+          Wrap(
+            spacing: Space.md,
+            runSpacing: Space.sm,
+            children: _actions(context, state),
+          ),
+        ],
+      ),
     );
   }
 
@@ -491,45 +513,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  /// The details as they stand. A field that has not been answered says so in
-  /// the muted ink rather than showing nothing — the gap is information, and
+  /// The details as they stand, grouped by the question they answer rather
+  /// than printed as one long ledger. A field that has not been answered says so
+  /// in the muted ink rather than showing nothing — the gap is information, and
   /// it is the same gap the meter above is counting.
   Widget _readOnly(BuildContext context, Profile p) {
     final bool tutor = p.role == Role.tutor;
     final PublicPlace? place = p.publicPlace;
+    final List<(String, String?)> about = <(String, String?)>[
+      (
+        'Birthdate',
+        p.birthdate == null
+            ? null
+            : '${describeDate(p.birthdate!)} · '
+                  '${ageOn(p.birthdate!, DateTime.now())} years old',
+      ),
+      ('Gender', p.gender),
+      ('Languages', p.languages.isEmpty ? null : p.languages.join(', ')),
+    ];
+    final List<(String, String?)> now = <(String, String?)>[
+      (
+        'Status',
+        p.statusText.trim().isEmpty
+            ? p.presence.label
+            : '${p.presence.label} · ${p.statusText}',
+      ),
+    ];
+    final List<(String, String?)> work = tutor
+        ? <(String, String?)>[
+            (
+              'Years of experience',
+              p.years == null ? null : '${p.years} years',
+            ),
+            ('Education', p.education),
+          ]
+        : <(String, String?)>[('Year level', p.grade)];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        _Details(
-          rows: <(String, String?)>[
-            (
-              'Birthdate',
-              p.birthdate == null
-                  ? null
-                  : '${describeDate(p.birthdate!)} · '
-                        '${ageOn(p.birthdate!, DateTime.now())} years old',
-            ),
-            if (place != null) ('Lives in', place.label),
-            (
-              'Status',
-              p.statusText.trim().isEmpty
-                  ? p.presence.label
-                  : '${p.presence.label} · ${p.statusText}',
-            ),
-            ('Gender', p.gender),
-            ('Languages', p.languages.isEmpty ? null : p.languages.join(', ')),
-            if (tutor)
-              (
-                'Years of experience',
-                p.years == null ? null : '${p.years} years',
-              ),
-            if (tutor) ('Education', p.education),
-            if (!tutor) ('Year level', p.grade),
-          ],
-        ),
+        _DetailGroup(label: 'About you', rows: about),
+        const SizedBox(height: Space.xl),
+        _DetailGroup(label: 'Right now', rows: now),
+        const SizedBox(height: Space.xl),
+        _DetailGroup(label: tutor ? 'Teaching' : 'School', rows: work),
         if (place != null) ...<Widget>[
           const SizedBox(height: Space.xl),
-          const TMMicroLabelText('Approximate area'),
+          Row(
+            children: <Widget>[
+              const TMMicroLabelText('Approximate area'),
+              const SizedBox(width: Space.sm),
+              TMIcon(
+                TMIconName.pin,
+                size: 13,
+                color: AppColors.accent.withValues(alpha: 0.8),
+              ),
+              const SizedBox(width: Space.xs + 1),
+              Flexible(
+                child: Text(
+                  place.label,
+                  style: AppType.bodySmall.tone(AppColors.inkSecondary),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: Space.sm),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
@@ -543,18 +592,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
         const SizedBox(height: Space.xl),
-        const TMMicroLabelText('Bio'),
-        const SizedBox(height: Space.sm),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Text(
-            p.bio.trim().isEmpty
-                ? 'No bio yet — a couple of lines about how you like to work is '
-                      'the thing people read before they write to you.'
-                : '“${p.bio}”',
-            style: p.bio.trim().isEmpty
-                ? AppType.bodyLarge.quieter
-                : AppType.quote,
+        _DetailGroup(
+          label: 'Bio',
+          rows: const <(String, String?)>[],
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Text(
+              p.bio.trim().isEmpty
+                  ? 'No bio yet — a couple of lines about how you like to work '
+                        'is the thing people read before they write to you.'
+                  : '“${p.bio}”',
+              style: p.bio.trim().isEmpty
+                  ? AppType.bodyLarge.quieter
+                  : AppType.quote,
+            ),
           ),
         ),
       ],
@@ -879,6 +930,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
           style: AppType.bodySmall.quieter,
         ),
         const SizedBox(height: Space.xl),
+
+        // A second reading of the same profile, in the column where the
+        // account facts live. The button above still opens the full preview.
+        const TMMicroLabelText('Two readings'),
+        const SizedBox(height: Space.md),
+        _ProfileFlipPreview(
+          profile: _draft(state.profile),
+          photo: state.photo,
+          flipped: _previewFlipped,
+          onFlip: () => setState(() => _previewFlipped = !_previewFlipped),
+        ),
+        const SizedBox(height: Space.xxl),
+
         // The role is an account fact rather than a preference: it is chosen
         // when you register and decides whose list you see from then on. A line
         // rather than a control, because there is nothing here to change.
@@ -1374,9 +1438,296 @@ class _AvatarControl extends StatelessWidget {
   }
 }
 
-/// A measured fraction of a rule: the completeness meter. Two pixels, filled
-/// in the accent over the hairline the rest of the page is drawn with — the
-/// same device the match score uses, because it is the same kind of thing.
+/// The profile seen two ways, small enough to sit in the account column.
+///
+/// It is the same two readings the full preview screen offers: the page as it
+/// was written, and the first glance a ranked list gives it. It turns on the
+/// same vertical axis, in the same 500 ms, and never mirrors its own back face.
+class _ProfileFlipPreview extends StatelessWidget {
+  const _ProfileFlipPreview({
+    required this.profile,
+    required this.photo,
+    required this.flipped,
+    required this.onFlip,
+  });
+
+  final Profile profile;
+  final Uint8List? photo;
+  final bool flipped;
+  final VoidCallback onFlip;
+
+  @override
+  Widget build(BuildContext context) {
+    final String name = profile.name.trim().isEmpty
+        ? 'Your name'
+        : profile.name.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          height: 248,
+          child: FlipCard(
+            flipped: flipped,
+            onTap: onFlip,
+            front: _MiniFace(
+              label: 'As written',
+              icon: TMIconName.eye,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      TMAvatar(name, size: 44, photo: photo),
+                      const SizedBox(width: Space.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              name,
+                              style: AppType.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            PersonStatusLine(
+                              presence: profile.presence,
+                              statusText: profile.statusText,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: Space.md),
+                  Expanded(
+                    child: Text(
+                      profile.bio.trim().isEmpty
+                          ? 'No bio yet. A couple of lines about how you work '
+                                'is the thing people read before they write.'
+                          : '“${profile.bio}”',
+                      style: profile.bio.trim().isEmpty
+                          ? AppType.bodySmall.quieter
+                          : AppType.quote.copyWith(fontSize: 14),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(height: Space.sm),
+                  const SizedBox(
+                    height: 1,
+                    child: ColoredBox(color: AppColors.rule),
+                  ),
+                  const SizedBox(height: Space.sm),
+                  Wrap(
+                    spacing: Space.md,
+                    runSpacing: Space.xs,
+                    children: <Widget>[
+                      if (profile.publicPlace != null)
+                        _MiniFact(
+                          icon: TMIconName.pin,
+                          text: profile.publicPlace!.city,
+                        ),
+                      _MiniFact(
+                        icon: TMIconName.graduation,
+                        text: profile.role == Role.student
+                            ? 'Student'
+                            : 'Tutor',
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            back: _MiniFace(
+              label: 'First glance',
+              icon: TMIconName.sparkle,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    name,
+                    style: AppType.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: Space.xxs),
+                  Text(
+                    profile.role == Role.tutor
+                        ? (profile.education.trim().isEmpty
+                              ? profile.style
+                              : profile.education)
+                        : (profile.grade.trim().isEmpty
+                              ? profile.style
+                              : '${profile.grade} · ${profile.style}'),
+                    style: AppType.bodySmall.quieter,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: Space.md),
+                  Wrap(
+                    spacing: Space.xs,
+                    runSpacing: Space.xs,
+                    children: <Widget>[
+                      for (final String subject in profile.subjects.take(3))
+                        _MiniChip(subject),
+                    ],
+                  ),
+                  const Spacer(),
+                  const SizedBox(
+                    height: 1,
+                    child: ColoredBox(color: AppColors.rule),
+                  ),
+                  const SizedBox(height: Space.sm),
+                  Wrap(
+                    spacing: Space.md,
+                    runSpacing: Space.xs,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      _MiniFact(
+                        icon: TMIconName.wallet,
+                        text: profile.role == Role.student
+                            ? 'up to \$${profile.budget}'
+                            : '\$${profile.budget}/hr',
+                      ),
+                      _MiniFact(
+                        icon: TMIconName.compass,
+                        text: profile.mode.label,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: Space.sm),
+        TMFocusable(
+          onTap: onFlip,
+          semanticLabel: flipped
+              ? 'Show the profile as written'
+              : 'Show the first-glance card',
+          semanticButton: false,
+          builder: (BuildContext context, TMState s) => TMFocusRing(
+            focused: s.focused,
+            radius: Radii.sharp,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: Space.xs),
+              child: Row(
+                children: <Widget>[
+                  TMIcon(
+                    TMIconName.refresh,
+                    size: 13,
+                    color: s.hovered || s.focused
+                        ? AppColors.accent
+                        : AppColors.inkMuted,
+                  ),
+                  const SizedBox(width: Space.xs + 2),
+                  Expanded(
+                    child: Text(
+                      flipped
+                          ? 'Showing the first glance. Turn it back.'
+                          : 'Showing the page. Turn it to a card.',
+                      style: AppType.bodySmall.tone(
+                        s.hovered || s.focused
+                            ? AppColors.accent
+                            : AppColors.inkMuted,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MiniFace extends StatelessWidget {
+  const _MiniFace({
+    required this.label,
+    required this.icon,
+    required this.child,
+  });
+
+  final String label;
+  final TMIconName icon;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return TMEntry(
+      padding: const EdgeInsets.all(Space.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              TMMicroLabelText(label),
+              const Spacer(),
+              TMIcon(icon, size: 12, color: AppColors.inkMuted),
+            ],
+          ),
+          const SizedBox(height: Space.md),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniFact extends StatelessWidget {
+  const _MiniFact({required this.icon, required this.text});
+
+  final TMIconName icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        TMIcon(icon, size: 12, color: AppColors.inkMuted),
+        const SizedBox(width: Space.xs + 1),
+        Text(
+          text,
+          style: AppType.bodySmall.tone(AppColors.inkSecondary),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+}
+
+class _MiniChip extends StatelessWidget {
+  const _MiniChip(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.paper,
+        border: Border.all(color: AppColors.ruleStrong),
+        borderRadius: BorderRadius.circular(Radii.pill),
+      ),
+      child: Text(
+        label,
+        style: AppType.micro.copyWith(fontSize: 9.5).tone(AppColors.inkSecondary),
+      ),
+    );
+  }
+}
+
+/// A measured fraction of a rule: the completeness meter. It fills once, on
+/// arrival, over the hairline the rest of the page is drawn with — the same
+/// kind of measured arrival as the match ring.
 class _Track extends StatelessWidget {
   const _Track({required this.fraction});
 
@@ -1384,16 +1735,83 @@ class _Track extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 2,
-      child: DecoratedBox(
-        decoration: const BoxDecoration(color: AppColors.rule),
-        child: FractionallySizedBox(
-          alignment: Alignment.centerLeft,
-          widthFactor: fraction.clamp(0.0, 1.0),
-          child: const ColoredBox(color: AppColors.accent),
-        ),
+    final double target = fraction.clamp(0.0, 1.0);
+    return Semantics(
+      label: 'Profile completeness ${(target * 100).round()} percent',
+      excludeSemantics: true,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: target),
+        duration: Motion.respect(context, const Duration(milliseconds: 620)),
+        curve: Motion.emphasized,
+        builder: (BuildContext context, double value, Widget? child) {
+          return SizedBox(
+            height: 3,
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                return Stack(
+                  alignment: Alignment.centerLeft,
+                  children: <Widget>[
+                    Container(
+                      height: 2,
+                      decoration: BoxDecoration(
+                        color: AppColors.rule,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                    Container(
+                      height: 2,
+                      width: constraints.maxWidth * value,
+                      decoration: BoxDecoration(
+                        color: AppColors.accent,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                    if (value > 0)
+                      Positioned(
+                        left: (constraints.maxWidth * value - 3).clamp(
+                          0.0,
+                          constraints.maxWidth - 6,
+                        ),
+                        child: Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: AppColors.accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          );
+        },
       ),
+    );
+  }
+}
+
+/// A labelled group of detail rows. The label is the question the rows answer,
+/// so the read-only profile scans as three short sections rather than one
+/// undifferentiated table.
+class _DetailGroup extends StatelessWidget {
+  const _DetailGroup({required this.label, required this.rows, this.child});
+
+  final String label;
+  final List<(String, String?)> rows;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        TMMicroLabelText(label),
+        const SizedBox(height: Space.sm),
+        if (rows.isNotEmpty) _Details(rows: rows),
+        ?child,
+      ],
     );
   }
 }

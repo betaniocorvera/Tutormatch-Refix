@@ -8,7 +8,7 @@
 //
 // Keyboard: Tab moves through, Enter and Space activate, and the focus ring is
 // a 2 px ink ring drawn OUTSIDE the control so it never shifts layout and never
-// competes with the accent red — the accent means "this is the action", the
+// competes with the accent green — the accent means "this is the action", the
 // ring means "the keyboard is here".
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ class TMFocusRing extends StatelessWidget {
           child: IgnorePointer(
             child: AnimatedOpacity(
               opacity: focused ? 1 : 0,
-              duration: Motion.fast,
+              duration: Motion.respect(context, Motion.fast),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   border: Border.all(color: ring, width: 2),
@@ -240,6 +240,7 @@ class TMButton extends StatelessWidget {
       semanticLabel: tooltip ?? label,
       builder: (BuildContext context, TMState state) {
         final _Paint paint = _paintFor(state);
+        final bool lifts = state.hovered && state.enabled && paint.fill != null;
         final Widget content = AnimatedContainer(
           duration: Motion.fast,
           curve: Motion.ease,
@@ -248,10 +249,17 @@ class TMButton extends StatelessWidget {
             horizontal: variant == TMButtonVariant.quiet ? Space.md : Space.xl,
             vertical: Space.md,
           ),
+          transform: Matrix4.translationValues(
+            0,
+            state.pressed ? 1 : (lifts ? -1 : 0),
+            0,
+          ),
+          transformAlignment: Alignment.center,
           decoration: BoxDecoration(
             color: paint.fill,
             borderRadius: Radii.sharpAll,
             border: paint.border == null ? null : Border.all(color: paint.border!),
+            boxShadow: lifts ? TMShadows.floating : null,
           ),
           child: Row(
             mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
@@ -340,6 +348,9 @@ class TMTextLink extends StatelessWidget {
     required this.onTap,
     this.style,
     this.icon,
+    this.color,
+    this.hoverColor,
+    this.minHeight,
     super.key,
   });
 
@@ -347,6 +358,17 @@ class TMTextLink extends StatelessWidget {
   final VoidCallback? onTap;
   final TextStyle? style;
   final TMIconName? icon;
+
+  /// Rest state colour. The default is ink; pass the primary colour when the
+  /// link is the one action that should read as actionable before hover.
+  final Color? color;
+
+  /// Hover/focus colour. Defaults to the primary accent.
+  final Color? hoverColor;
+
+  /// Expands the tap target without moving the text. Use [Hit.min] for a link
+  /// that stands alone rather than sitting inside a sentence.
+  final double? minHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -360,37 +382,48 @@ class TMTextLink extends StatelessWidget {
         final Color ink = onTap == null
             ? AppColors.inkMuted
             : s.hovered || s.focused
-                ? AppColors.accent
-                : AppColors.ink;
+                ? (hoverColor ?? AppColors.accent)
+                : (color ?? AppColors.ink);
+        final Widget content = Padding(
+          padding: const EdgeInsets.symmetric(vertical: Space.sm, horizontal: Space.xxs),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: base.tone(ink).copyWith(
+                        decoration: s.hovered || s.focused
+                            ? TextDecoration.underline
+                            : TextDecoration.none,
+                        decorationColor: ink,
+                        decorationThickness: 1.2,
+                      ),
+                ),
+              ),
+              if (icon != null) ...<Widget>[
+                const SizedBox(width: Space.sm),
+                TMIcon(icon!, size: 16, color: ink),
+              ],
+            ],
+          ),
+        );
+
         return TMFocusRing(
           focused: s.focused,
           radius: Radii.sharp,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.sm, horizontal: Space.xxs),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: base.tone(ink).copyWith(
-                          decoration: s.hovered || s.focused
-                              ? TextDecoration.underline
-                              : TextDecoration.none,
-                          decorationColor: ink,
-                          decorationThickness: 1.2,
-                        ),
+          child: minHeight == null
+              ? content
+              : ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: minHeight!),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: 1,
+                    child: content,
                   ),
                 ),
-                if (icon != null) ...<Widget>[
-                  const SizedBox(width: Space.sm),
-                  TMIcon(icon!, size: 16, color: ink),
-                ],
-              ],
-            ),
-          ),
         );
       },
     );

@@ -1,20 +1,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// TutorMatch visual system.
+// TutorMatch visual system — "Signal, not noise".
 //
-// This is the ONLY file in the project that names a colour, a font size, a
-// radius or a spacing value. Widgets and screens read from it. If you need a
-// value that is not here, add it here first — that rule is what keeps the
-// product looking like one product instead of eight screens by eight people.
+// This is the ONLY file in the project that names a colour, a type size, a
+// radius or a motion value. Widgets read from here. If a screen needs a value
+// that is not here, the value belongs here first.
 //
-// THE WORLD: a university course bulletin. Warm paper, ink, hairline rules,
-// tabular numerals, entries that read as printed rows rather than floating
-// cards. Two voices: Spectral (a serif) speaks — titles, people's names,
-// editorial prose — and Public Sans works: labels, controls, every number.
-// The one accent is an ink red. It marks the primary action, the current
-// selection and the match score, and it is never used for status.
+// THE IDEA: matching is a question of distance. The interface behaves like a
+// quiet instrument for reading closeness — cool paper, deep ink, one green
+// signal, one amber marker for the nearest match. Hairlines do the structural
+// work; shadows are reserved for things that genuinely lift off the page.
 //
-// Scene that fixed light/dark: a student at a kitchen table in the afternoon,
-// a tutor between lessons in a well-lit room. Paper wins.
+// TYPE: Bricolage Grotesque speaks (headlines, names, the mark). Figtree does
+// the work (body, labels, controls). IBM Plex Mono reads the instrument
+// (scores, rates, times), with tabular figures so numbers do not shift.
+//
+// MOTION: state changes only, 150–250 ms; page changes 380 ms on an ease-out
+// curve. No bounce, no spin, no ambient loops except the neighbour map's slow
+// orbit. All of it collapses under MediaQuery.disableAnimations.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -28,71 +30,87 @@ enum Role { student, tutor }
 
 /// Every colour in the product, in one place, named by its job.
 ///
-/// Contrast notes are measured against [paper] unless stated otherwise.
-/// Accent and moss both clear 4.5:1 on paper AND as fills under [onAccent].
+/// The ground is a cool, green-leaning paper rather than a warm cream: it lets
+/// the deep teal sit as ink rather than decoration. Contrast notes are measured
+/// against [paper] unless stated otherwise.
 abstract final class AppColors {
-  // Grounds — warm paper, three depths. No cool greys anywhere.
-  static const Color paper = Color(0xFFF6F1E6); // page ground
-  static const Color paperRaised = Color(0xFFFDFAF3); // entries, inputs
-  static const Color paperSunken = Color(0xFFEDE6D7); // rails, wells, tracks
+  // Grounds — three depths of the same cool paper. No neutral greys.
+  static const Color paper = Color(0xFFF3F5F2); // page ground
+  static const Color paperRaised = Color(0xFFFBFCFA); // cards, inputs, sheets
+  static const Color paperSunken = Color(0xFFE8ECE7); // wells, tracks, rails
 
-  // Ink — warm near-black through to a quiet grey-brown. 14.3:1 / 8.7:1 / 5.2:1
-  static const Color ink = Color(0xFF17130E);
-  static const Color inkSecondary = Color(0xFF4B4237);
-  static const Color inkMuted = Color(0xFF6E6455);
-  static const Color onAccent = Color(0xFFFFFCF6); // on ink, on accent, on moss
+  // Ink — green-black through to a quiet slate. 15.1:1 / 8.6:1 / 4.9:1.
+  static const Color ink = Color(0xFF14211C);
+  static const Color inkSecondary = Color(0xFF43514B);
+  static const Color inkMuted = Color(0xFF5F6D66);
+  static const Color onAccent = Color(0xFFF7FBF8); // on teal, ink, amber (dark text)
 
-  // Text on the ink band. Measured against [ink]: 18.0:1, 12.0:1, 8.3:1.
-  // Tinted from the paper hue, never grey — grey on warm black reads dead.
-  static const Color onInkQuiet = Color(0xFFD8CFBE);
-  static const Color onInkFaint = Color(0xFFB9AC94);
+  // Text on the ink band. Measured against [ink]: 11.9:1, 7.1:1.
+  // Tinted from the paper hue; grey on green-black reads dead.
+  static const Color onInkQuiet = Color(0xFFC8D3CD);
+  static const Color onInkFaint = Color(0xFF93A29A);
 
-  // Rules — hairline separators. The system's primary depth device.
-  static const Color rule = Color(0xFFDCD3C1);
-  static const Color ruleStrong = Color(0xFFB9AC94);
+  // Rules — the system's primary depth device. Hairlines, never heavy boxes.
+  static const Color rule = Color(0xFFDCE2DD);
+  static const Color ruleStrong = Color(0xFFC3CCC6);
 
-  // The one accent. 6.6:1 on paper, 7.3:1 under onAccent text.
+  // The primary signal. 8.4:1 on paper, 8.9:1 under onAccent text.
   //
-  // The accent has exactly four jobs and they are all "what needs your
-  // attention": the primary action, the current selection, the match score, and
-  // a field you have to fix. It is never used for request status — accepted,
-  // pending and rejected have their own vocabulary below, because a rejected
-  // request wearing the action colour is a lie about what just happened.
-  static const Color accent = Color(0xFF9E2B25);
+  // The green has exactly four jobs, all "what needs your attention": the
+  // primary action, the current selection, the match score, and the focused
+  // field. It is never used for request status — accepted, pending and
+  // declined have their own vocabulary below.
+  static const Color accent = Color(0xFF0F5C4D);
 
-  /// Form validation and blocked actions. Same red as the accent: the
-  /// difference is context, not hue, and inventing a second red would fail
-  /// contrast or read as a different brand.
-  static const Color alert = accent;
-  static const Color accentPressed = Color(0xFF7C1F1A);
-  static const Color accentWash = Color(0xFFF4E3DE); // tint for selected rows
+  /// Form validation and blocked actions. A true error red, distinct from the
+  /// green signal so a mistake never looks like an invitation to act.
+  static const Color alert = Color(0xFFB23A2F);
 
-  // Status. Deliberately NOT the accent — a rejected request must not look
-  // like a primary action.
-  static const Color accepted = Color(0xFF3E5C4B); // 6.6:1 on paper
-  static const Color acceptedWash = Color(0xFFE3EAE3);
+  static const Color accentPressed = Color(0xFF0A463B);
+  static const Color accentHover = Color(0xFF0C5143);
+  static const Color accentWash = Color(0xFFE2EFE9); // tint for selected rows
+
+  // The one amber. Reserved for the nearest match and the single highlight a
+  // person should notice next — never for a primary button, never for status.
+  // 8.9:1 against ink; ink on amber is 8.9:1.
+  static const Color amber = Color(0xFFF2B544);
+  static const Color amberWash = Color(0xFFFBF0D8);
+  static const Color onAmber = Color(0xFF2B210B);
+
+  /// The nearest match. An alias, not a second amber.
+  static const Color topMatch = amber;
+  static const Color topMatchWash = amberWash;
+
+  // Status. Deliberately NOT the amber. A rejected request must not look like
+  // the nearest match or a primary action.
+  static const Color accepted = Color(0xFF2C6E54); // 5.9:1 on paper
+  static const Color acceptedWash = Color(0xFFE4F1E9);
   static const Color pending = Color(0xFF8A5A11); // 5.3:1 on paper
-  static const Color pendingWash = Color(0xFFF5E9D5);
-  static const Color declined = Color(0xFF6E6455); // = inkMuted, on purpose
-  static const Color declinedWash = Color(0xFFE9E3D6);
+  static const Color pendingWash = Color(0xFFFBF0D8);
+  static const Color declined = Color(0xFF5F6D66); // = inkMuted, on purpose
+  static const Color declinedWash = Color(0xFFE9EDE9);
 
-  // Identity fills for the three sample people who have "a picture". Not a
-  // status: these never mean accepted, pending or refused, and they are not
-  // the accent — they are flat dyes, the honest stand-in for a photograph this
-  // product deliberately does not use. Initials sit on them in [onAccent],
-  // and each one clears 6:1 against it.
-  static const Color avatarSlate = Color(0xFF3F5568);
-  static const Color avatarPlum = Color(0xFF5B3E56);
-  static const Color avatarClay = Color(0xFF8A5137);
+  // Identity fills for people with "a picture" in the sample data. These never
+  // mean accepted, pending or declined. Initials sit on them in [onAccent],
+  // and each clears 6:1 against it.
+  static const Color avatarSlate = Color(0xFF3D5A5F);
+  static const Color avatarPlum = Color(0xFF5B4656);
+  static const Color avatarClay = Color(0xFF8A5A3B);
+  static const Color avatarMoss = Color(0xFF4A6842);
+  static const Color avatarSteel = Color(0xFF455A6B);
 
-  // Focus. Ink, not accent, so focus is unambiguous: it is the only 2px ring
-  // in the system and it never competes with selection for meaning.
-  static const Color focusRing = Color(0xFF17130E);
+  // Focus. Ink, not green, so focus is unambiguous: the only 2 px ring in the
+  // system, and it never competes with selection for meaning.
+  static const Color focusRing = Color(0xFF14211C);
 
-  /// Ink on a coloured fill. Kept as a function so a new fill cannot be added
-  /// without deciding what sits on top of it.
+  // Scrims for media and modals. Green-black, never flat black.
+  static const Color scrim = Color(0xE614211C);
+  static const Color veil = Color(0x6614211C);
+
+  /// Ink on a coloured fill. Luminance-aware so amber automatically takes ink
+  /// and teal takes paper — a new fill cannot arrive without a readable label.
   static Color on(Color fill) =>
-      (fill == paper || fill == paperRaised || fill == paperSunken) ? ink : onAccent;
+      fill.computeLuminance() > 0.45 ? ink : onAccent;
 
   /// Tint for a status wash and the ink that belongs on it.
   static (Color wash, Color text) statusTint(StatusTone tone) => switch (tone) {
@@ -128,19 +146,37 @@ abstract final class Space {
   static double band(double width) => width >= AppBreakpoints.wide ? vast : huge;
 }
 
-/// Corners. Print has nearly square corners; the web rounds everything. We
-/// side with print, and keep one soft radius for the two things that genuinely
-/// float above the page.
+/// Corners. One soft radius for everything that holds content, one pill for
+/// things you can choose, and a larger soft corner for floating surfaces.
 abstract final class Radii {
-  static const double sharp = 3; // entries, inputs, buttons — the default
-  static const double soft = 12; // the floating action panel, dialogs, menus
-  static const double pill = 999; // tags and chips only, never a container
+  static const double sharp = 12; // cards, inputs, buttons — the default
+  static const double soft = 20; // dialogs, sheets, floating panels
+  static const double pill = 999; // tags, chips, status pills only
   static const BorderRadius sharpAll = BorderRadius.all(Radius.circular(sharp));
   static const BorderRadius softAll = BorderRadius.all(Radius.circular(soft));
 }
 
+/// Shadows are a last resort: hairline borders carry structure. The two here
+/// are only for a surface that has physically lifted (tilt, drag, dialog).
+abstract final class TMShadows {
+  static const List<BoxShadow> floating = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x1414211C),
+      blurRadius: 24,
+      offset: Offset(0, 8),
+    ),
+  ];
+  static const List<BoxShadow> lifted = <BoxShadow>[
+    BoxShadow(
+      color: Color(0x1F14211C),
+      blurRadius: 44,
+      offset: Offset(0, 18),
+    ),
+  ];
+}
+
 /// Minimum hit area. Apple and Material both land on 44; we hold it everywhere,
-/// including on the compact tag chips by padding rather than by growing them.
+/// including on compact chips by padding rather than by growing the chip.
 abstract final class Hit {
   static const double min = 44;
 }
@@ -153,151 +189,202 @@ abstract final class AppBreakpoints {
   static const double wide = 1200; // at/above: full two-column shell
   static const double maxContent = 1200;
   static const double measure = 68; // characters, for prose columns
+
+  /// Below this, 3D is switched off entirely: a narrow phone should get a flat,
+  /// legible map, not a squashed one.
+  static const double flat3d = 360;
 }
 
 /// Motion. Short and purposeful: state changes only, never decoration.
+///
+/// `fast`/`base`/`slow` are the everyday vocabulary. The longer values are
+/// reserved for authored moments: a page push, a staggered reveal, a card flip.
 abstract final class Motion {
   static const Duration fast = Duration(milliseconds: 150);
   static const Duration base = Duration(milliseconds: 200);
   static const Duration slow = Duration(milliseconds: 250);
+  static const Duration page = Duration(milliseconds: 380);
+  static const Duration reveal = Duration(milliseconds: 420);
+  static const Duration flip = Duration(milliseconds: 500);
+  static const Duration stagger = Duration(milliseconds: 55);
+  static const Duration orbit = Duration(seconds: 60);
+
   static const Curve ease = Curves.easeOutCubic;
   static const Curve easeInOut = Curves.easeInOutCubic;
+  static const Curve emphasized = Cubic(0.22, 1, 0.36, 1);
+  static const Curve settle = Cubic(0.2, 0.7, 0.2, 1);
+
+  /// True when the platform asks for reduced motion. Every authored animation
+  /// in the product must consult this and provide a still alternative.
+  static bool reduced(BuildContext context) =>
+      MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+
+  /// Duration helper: zero under reduced motion, the authored value otherwise.
+  static Duration respect(BuildContext context, Duration duration) =>
+      reduced(context) ? Duration.zero : duration;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The type scale. Two families, one job each.
+/// The type scale. Three families, one job each.
 ///
-/// Spectral is the editorial voice and appears ONLY on titles, people's names,
-/// pull quotes and the wordmark. It is never used for a label, a button or a
-/// number, because in this product every number is data and data is read in
-/// Public Sans with tabular figures.
+/// Bricolage Grotesque is the voice: titles, people's names, the wordmark.
+/// Figtree is the hand: body, labels, controls, buttons. IBM Plex Mono is the
+/// instrument: scores, rates, times and counts, always tabular. No serif is
+/// used anywhere in the product.
 ///
-/// Both faces are bundled in assets/fonts and declared in pubspec.yaml. Nothing
-/// is fetched at runtime: the first frame is set in the real type, and the app
-/// renders identically with no network.
-///
-/// Product screens use this fixed scale. Only the landing hero is fluid, via
-/// [heroAt], because it is the one brand surface in the app.
+/// All faces are bundled, so the first frame is set in the real type and the
+/// layout never waits on a network round trip. Bricolage and Figtree are
+/// variable cuts; their weight axes are set explicitly below.
 abstract final class AppType {
-  static const String _serifFamily = 'Spectral';
-  static const String _sansFamily = 'Public Sans';
-
-  static const List<String> _serifFallback = <String>['Georgia', 'serif'];
-  static const List<String> _sansFallback = <String>[
+  static const List<String> _fallback = <String>[
     'Segoe UI',
-    'Roboto',
     'Helvetica Neue',
     'Arial',
+    'sans-serif',
   ];
 
-  static const List<FontFeature> _tabular = <FontFeature>[FontFeature.tabularFigures()];
+  static const List<FontFeature> _tabular = <FontFeature>[
+    FontFeature.tabularFigures(),
+  ];
 
-  /// Public Sans is one variable file, whose default instance is Regular.
-  /// Without this the whole interface would draw in Regular whatever weight was
-  /// asked for, and the labels and numerals that carry the hierarchy would lose
-  /// it. Static families ignore `fontVariations`, so this is safe for Spectral.
-  static List<FontVariation> _wght(FontWeight weight) =>
-      <FontVariation>[FontVariation('wght', weight.value.toDouble())];
-
-  static TextStyle _serif(
+  static TextStyle _display(
     double size,
     FontWeight weight,
     double height, {
     double tracking = 0,
     Color color = AppColors.ink,
-    bool italic = false,
+    FontStyle style = FontStyle.normal,
   }) =>
       TextStyle(
-        fontFamily: _serifFamily,
-        fontFamilyFallback: _serifFallback,
+        fontFamily: 'Bricolage Grotesque',
         fontSize: size,
         fontWeight: weight,
+        fontVariations: <FontVariation>[
+          FontVariation('wght', weight.value.toDouble()),
+          const FontVariation('opsz', 28),
+        ],
         height: height,
         letterSpacing: tracking,
         color: color,
-        fontStyle: italic ? FontStyle.italic : FontStyle.normal,
+        fontStyle: style,
+        fontFamilyFallback: _fallback,
       );
 
-  static TextStyle _sans(
+  static TextStyle _body(
     double size,
     FontWeight weight,
     double height, {
     double tracking = 0,
     Color color = AppColors.ink,
-    bool tabular = false,
+    FontStyle style = FontStyle.normal,
   }) =>
       TextStyle(
-        fontFamily: _sansFamily,
-        fontFamilyFallback: _sansFallback,
+        fontFamily: 'Figtree',
+        fontSize: size,
+        fontWeight: weight,
+        fontVariations: <FontVariation>[
+          FontVariation('wght', weight.value.toDouble()),
+        ],
+        height: height,
+        letterSpacing: tracking,
+        color: color,
+        fontStyle: style,
+        fontFamilyFallback: _fallback,
+      );
+
+  static TextStyle _mono(
+    double size,
+    FontWeight weight,
+    double height, {
+    double tracking = 0,
+    Color color = AppColors.ink,
+  }) =>
+      TextStyle(
+        fontFamily: 'IBM Plex Mono',
         fontSize: size,
         fontWeight: weight,
         height: height,
         letterSpacing: tracking,
         color: color,
-        fontVariations: _wght(weight),
-        fontFeatures: tabular ? _tabular : null,
+        fontFeatures: _tabular,
+        fontFamilyFallback: const <String>['Consolas', 'monospace'],
       );
 
-  // ── Display — Spectral ────────────────────────────────────────────────────
+  // ── Display — Bricolage Grotesque ─────────────────────────────────────────
   /// Landing hero only. Fluid; see [heroAt].
   static TextStyle get hero => heroAt(375);
-  static TextStyle heroAt(double width) => _serif(
+
+  static TextStyle heroAt(double width) => _display(
         width >= AppBreakpoints.wide
-            ? 68
+            ? 74
             : width >= AppBreakpoints.medium
-                ? 52
+                ? 58
                 : width >= AppBreakpoints.compact
-                    ? 40
-                    : 33,
+                    ? 46
+                    : 36,
         FontWeight.w600,
-        width >= AppBreakpoints.medium ? 1.02 : 1.08,
-        tracking: -0.02,
+        width >= AppBreakpoints.medium ? 0.98 : 1.02,
+        tracking: width >= AppBreakpoints.wide
+            ? -2.6
+            : width >= AppBreakpoints.medium
+                ? -2.0
+                : -1.4,
       );
 
-  /// The largest serif used inside the product: page titles.
-  static TextStyle get pageTitle => _serif(31, FontWeight.w600, 1.14, tracking: -0.015);
-  static TextStyle get titleLarge => _serif(24, FontWeight.w600, 1.2, tracking: -0.01);
+  /// The largest heading used inside the product: page titles.
+  static TextStyle get pageTitle =>
+      _display(34, FontWeight.w600, 1.08, tracking: -1.1);
+  static TextStyle get titleLarge =>
+      _display(26, FontWeight.w600, 1.12, tracking: -0.7);
 
-  /// A person's name on a match entry. The subject of the row, so it is serif.
-  static TextStyle get name => _serif(21, FontWeight.w600, 1.22, tracking: -0.008);
-  static TextStyle get sectionTitle => _serif(17.5, FontWeight.w600, 1.3);
-  static TextStyle get quote => _serif(19, FontWeight.w400, 1.5, italic: true);
-  static TextStyle get wordmark => _serif(21, FontWeight.w700, 1.0, tracking: -0.015);
+  /// A person's name on a match entry — the subject of the row.
+  static TextStyle get name =>
+      _display(22, FontWeight.w600, 1.16, tracking: -0.5);
+  static TextStyle get sectionTitle =>
+      _display(18.5, FontWeight.w600, 1.26, tracking: -0.2);
+  static TextStyle get quote =>
+      _body(19, FontWeight.w400, 1.55, style: FontStyle.italic);
+  static TextStyle get wordmark =>
+      _display(21, FontWeight.w700, 1.0, tracking: -0.6);
 
-  // ── Task — Public Sans ────────────────────────────────────────────────────
-  static TextStyle get bodyLarge => _sans(16.5, FontWeight.w400, 1.62);
-  static TextStyle get body => _sans(15, FontWeight.w400, 1.6);
-  static TextStyle get bodySmall => _sans(13.5, FontWeight.w400, 1.55);
-  static TextStyle get label => _sans(14.5, FontWeight.w500, 1.35);
-  static TextStyle get labelSmall => _sans(13, FontWeight.w500, 1.35);
-  static TextStyle get button => _sans(15, FontWeight.w600, 1.0, tracking: 0.005);
+  // ── Task — Figtree ────────────────────────────────────────────────────────
+  static TextStyle get bodyLarge => _body(16.5, FontWeight.w400, 1.62);
+  static TextStyle get body => _body(15, FontWeight.w400, 1.6);
+  static TextStyle get bodySmall => _body(13.5, FontWeight.w400, 1.55);
+  static TextStyle get label => _body(14.5, FontWeight.w500, 1.35);
+  static TextStyle get labelSmall => _body(13, FontWeight.w500, 1.35);
+  static TextStyle get button =>
+      _body(15, FontWeight.w600, 1.0, tracking: 0.1);
 
   /// Uppercase micro-label. Used for data captions and column headers — a
-  /// label on a table, never an eyebrow above a heading.
-  static TextStyle get micro => _sans(11, FontWeight.w600, 1.25, tracking: 0.1);
+  /// label on an instrument, never an eyebrow above a heading.
+  static TextStyle get micro =>
+      _body(11, FontWeight.w600, 1.25, tracking: 1.1);
 
   /// Emoji are glyphs, not a typeface; this only fixes the size they are set
   /// at in the picker. The platform supplies the drawing.
-  static TextStyle get emoji => _sans(22, FontWeight.w400, 1.2);
+  static TextStyle get emoji => _body(22, FontWeight.w400, 1.2);
 
-  // ── Numerals — always tabular ─────────────────────────────────────────────
+  // ── Numerals — IBM Plex Mono, always tabular ──────────────────────────────
   /// The match score. The single largest number in the product.
-  static TextStyle get score => _sans(40, FontWeight.w700, 1.0, tracking: -0.03, tabular: true);
-  static TextStyle get scoreSmall => _sans(20, FontWeight.w700, 1.0, tracking: -0.01, tabular: true);
-  static TextStyle get figure => _sans(15, FontWeight.w600, 1.3, tabular: true);
-  static TextStyle get figureLarge => _sans(18, FontWeight.w600, 1.25, tabular: true);
+  static TextStyle get score =>
+      _mono(44, FontWeight.w500, 1.0, tracking: -1.8);
+  static TextStyle get scoreSmall =>
+      _mono(21, FontWeight.w500, 1.0, tracking: -0.6);
+  static TextStyle get figure => _mono(14.5, FontWeight.w500, 1.3);
+  static TextStyle get figureLarge => _mono(18, FontWeight.w500, 1.25);
 
   /// Assembles a Material [TextTheme] from the scale above, so framework
-  /// widgets (dialogs, tooltips, text selection) inherit the same two faces.
+  /// widgets (dialogs, tooltips, text selection) inherit the same faces.
   static TextTheme textTheme() => TextTheme(
         displayLarge: pageTitle,
         displayMedium: titleLarge,
         headlineMedium: sectionTitle,
         titleLarge: name,
-        titleMedium: _sans(15.5, FontWeight.w600, 1.35),
+        titleMedium: _body(15.5, FontWeight.w600, 1.35),
         bodyLarge: bodyLarge.copyWith(color: AppColors.inkSecondary),
         bodyMedium: body.copyWith(color: AppColors.inkSecondary),
         bodySmall: bodySmall.copyWith(color: AppColors.inkMuted),
@@ -327,14 +414,34 @@ abstract final class AppTheme {
     ).copyWith(
       primary: AppColors.accent,
       onPrimary: AppColors.onAccent,
+      primaryContainer: AppColors.accentWash,
+      onPrimaryContainer: AppColors.ink,
+      secondary: AppColors.amber,
+      onSecondary: AppColors.onAmber,
+      secondaryContainer: AppColors.amberWash,
+      onSecondaryContainer: AppColors.ink,
       surface: AppColors.paper,
       onSurface: AppColors.ink,
+      surfaceContainerLowest: AppColors.paperRaised,
+      surfaceContainerLow: AppColors.paperRaised,
+      surfaceContainer: AppColors.paper,
+      surfaceContainerHigh: AppColors.paperSunken,
       surfaceContainerHighest: AppColors.paperSunken,
-      outline: AppColors.rule,
+      outline: AppColors.ruleStrong,
       outlineVariant: AppColors.rule,
-      error: AppColors.accent,
+      error: AppColors.alert,
       onError: AppColors.onAccent,
-      shadow: const Color(0x1A17130E),
+      shadow: const Color(0x1A14211C),
+      scrim: AppColors.scrim,
+    );
+
+    const OutlineInputBorder fieldBorder = OutlineInputBorder(
+      borderRadius: Radii.sharpAll,
+      borderSide: BorderSide(color: AppColors.ruleStrong),
+    );
+    const OutlineInputBorder fieldFocus = OutlineInputBorder(
+      borderRadius: Radii.sharpAll,
+      borderSide: BorderSide(color: AppColors.ink, width: 2),
     );
 
     return ThemeData(
@@ -343,6 +450,7 @@ abstract final class AppTheme {
       scaffoldBackgroundColor: AppColors.paper,
       canvasColor: AppColors.paper,
       textTheme: text,
+      visualDensity: VisualDensity.standard,
       // Paper, not a white card floating on grey.
       dividerTheme: const DividerThemeData(
         color: AppColors.rule,
@@ -350,30 +458,93 @@ abstract final class AppTheme {
         space: Space.xl,
       ),
       iconTheme: const IconThemeData(color: AppColors.inkSecondary, size: 20),
+      appBarTheme: AppBarTheme(
+        backgroundColor: AppColors.paper,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: AppColors.ink,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleTextStyle: AppType.titleLarge,
+      ),
+      cardTheme: const CardThemeData(
+        color: AppColors.paperRaised,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: Radii.sharpAll,
+          side: BorderSide(color: AppColors.rule),
+        ),
+      ),
       // Text selection and the caret are part of the design; theme them.
       textSelectionTheme: const TextSelectionThemeData(
         cursorColor: AppColors.accent,
         selectionColor: AppColors.accentWash,
         selectionHandleColor: AppColors.accent,
       ),
-      // Native scrollbars restyled to the palette (craft floor: browser surfaces).
-      scrollbarTheme: ScrollbarThemeData(
-        thickness: const WidgetStatePropertyAll<double>(8),
-        radius: const Radius.circular(Radii.pill),
-        thumbColor: WidgetStateProperty.resolveWith<Color>(
-          (Set<WidgetState> s) =>
-              s.contains(WidgetState.dragged) ? AppColors.ruleStrong : AppColors.rule,
+      inputDecorationTheme: const InputDecorationTheme(
+        filled: true,
+        fillColor: AppColors.paperRaised,
+        border: fieldBorder,
+        enabledBorder: fieldBorder,
+        focusedBorder: fieldFocus,
+        errorBorder: OutlineInputBorder(
+          borderRadius: Radii.sharpAll,
+          borderSide: BorderSide(color: AppColors.alert),
         ),
-        trackColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: Radii.sharpAll,
+          borderSide: BorderSide(color: AppColors.alert, width: 2),
+        ),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: Space.lg,
+          vertical: Space.lg,
+        ),
+        hintStyle: TextStyle(color: AppColors.inkMuted),
       ),
-      tooltipTheme: TooltipThemeData(
-        decoration: const BoxDecoration(
-          color: AppColors.ink,
-          borderRadius: Radii.softAll,
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.accent,
+          foregroundColor: AppColors.onAccent,
+          disabledBackgroundColor: AppColors.paperSunken,
+          disabledForegroundColor: AppColors.inkMuted,
+          elevation: 0,
+          minimumSize: const Size(0, Hit.min),
+          padding: const EdgeInsets.symmetric(horizontal: Space.xl),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.sharpAll),
+          textStyle: AppType.button,
         ),
-        textStyle: AppType.bodySmall.tone(AppColors.onAccent),
-        padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.sm),
-        waitDuration: const Duration(milliseconds: 400),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.ink,
+          side: const BorderSide(color: AppColors.ruleStrong),
+          minimumSize: const Size(0, Hit.min),
+          padding: const EdgeInsets.symmetric(horizontal: Space.xl),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.sharpAll),
+          textStyle: AppType.button,
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.accent,
+          minimumSize: const Size(0, Hit.min),
+          padding: const EdgeInsets.symmetric(horizontal: Space.md),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.sharpAll),
+          textStyle: AppType.button,
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: AppColors.paperRaised,
+        selectedColor: AppColors.accentWash,
+        side: const BorderSide(color: AppColors.ruleStrong),
+        shape: const StadiumBorder(),
+        labelStyle: AppType.labelSmall.tone(AppColors.inkSecondary),
+        secondaryLabelStyle: AppType.labelSmall.tone(AppColors.accent),
+        padding: const EdgeInsets.symmetric(
+          horizontal: Space.md,
+          vertical: Space.xs,
+        ),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: AppColors.paperRaised,
@@ -383,7 +554,57 @@ abstract final class AppTheme {
         titleTextStyle: AppType.titleLarge,
         contentTextStyle: AppType.body.quiet,
       ),
-      // Default page transition is 300 ms. The product moves in 200.
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: AppColors.paperRaised,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.soft)),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: AppColors.paperRaised,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: Radii.sharpAll,
+          side: const BorderSide(color: AppColors.rule),
+        ),
+        textStyle: AppType.body,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: AppColors.ink,
+        contentTextStyle: AppType.bodySmall.tone(AppColors.onAccent),
+        behavior: SnackBarBehavior.floating,
+        elevation: 0,
+        insetPadding: const EdgeInsets.all(Space.lg),
+        shape: const RoundedRectangleBorder(borderRadius: Radii.sharpAll),
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: const BoxDecoration(
+          color: AppColors.ink,
+          borderRadius: Radii.sharpAll,
+        ),
+        textStyle: AppType.bodySmall.tone(AppColors.onAccent),
+        padding: const EdgeInsets.symmetric(
+          horizontal: Space.md,
+          vertical: Space.sm,
+        ),
+        waitDuration: const Duration(milliseconds: 400),
+      ),
+      // Native scrollbars restyled to the palette (craft floor: browser surfaces).
+      scrollbarTheme: ScrollbarThemeData(
+        thickness: const WidgetStatePropertyAll<double>(8),
+        radius: const Radius.circular(Radii.pill),
+        thumbColor: WidgetStateProperty.resolveWith<Color>(
+          (Set<WidgetState> s) => s.contains(WidgetState.dragged)
+              ? AppColors.inkMuted
+              : AppColors.ruleStrong,
+        ),
+        trackColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+      ),
+      // Default page transition is 300 ms. Our authored route move is 380 ms
+      // and lives in [TMTransitions.page]; stop Material stacking a second one.
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: <TargetPlatform, PageTransitionsBuilder>{
           TargetPlatform.windows: _NoAnimationPageTransition(),
@@ -397,7 +618,7 @@ abstract final class AppTheme {
   }
 }
 
-/// The real transition is the 200 ms travel in [TMTransitions.page]. This
+/// The real transition is the authored push in [TMTransitions.page]. This
 /// builder exists only to stop Material stacking a second, slower one on top.
 class _NoAnimationPageTransition extends PageTransitionsBuilder {
   const _NoAnimationPageTransition();
@@ -412,25 +633,65 @@ class _NoAnimationPageTransition extends PageTransitionsBuilder {
       child;
 }
 
-/// Page-level motion. One authored move: content rises 10 px and fades, in
-/// 200 ms, eased out, from an already-visible default.
+/// Page-level motion. One authored move: the incoming page arrives from the
+/// right on a shallow perspective axis (≈6°), settling flat in 380 ms, while
+/// the page it covers steps back and turns away by half as much.
+///
+/// The rotation is applied to the page as a whole, never to body text or an
+/// input, and it disappears completely when the platform asks for reduced
+/// motion.
 abstract final class TMTransitions {
   static Route<T> page<T>(Widget child, {String? name}) => PageRouteBuilder<T>(
         settings: RouteSettings(name: name),
-        transitionDuration: Motion.base,
-        reverseTransitionDuration: Motion.fast,
+        transitionDuration: Motion.page,
+        reverseTransitionDuration: Motion.slow,
         pageBuilder: (_, _, _) => child,
-        transitionsBuilder: (BuildContext context, Animation<double> a, _, Widget child) {
-          final Animation<double> eased = CurvedAnimation(parent: a, curve: Motion.ease);
-          return FadeTransition(
-            opacity: eased,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.018),
-                end: Offset.zero,
-              ).animate(eased),
-              child: child,
-            ),
+        transitionsBuilder: (
+          BuildContext context,
+          Animation<double> animation,
+          Animation<double> secondaryAnimation,
+          Widget child,
+        ) {
+          if (Motion.reduced(context)) return child;
+
+          final Animation<double> enter = CurvedAnimation(
+            parent: animation,
+            curve: Motion.emphasized,
+            reverseCurve: Motion.ease,
+          );
+          final Animation<double> covered = CurvedAnimation(
+            parent: secondaryAnimation,
+            curve: Motion.emphasized,
+            reverseCurve: Motion.ease,
+          );
+
+          return AnimatedBuilder(
+            animation: Listenable.merge(<Listenable>[enter, covered]),
+            child: child,
+            builder: (BuildContext context, Widget? child) {
+              final double inT = enter.value;
+              final double outT = covered.value;
+              final double incoming = 1 - inT;
+              final double width = MediaQuery.sizeOf(context).width;
+              final double angle = incoming * 0.105 - outT * 0.055;
+              final double dx = incoming * width * 0.045 - outT * width * 0.018;
+              final double scale = 1 - outT * 0.012;
+
+              final Matrix4 transform = Matrix4.identity()
+                ..setEntry(3, 2, 0.001)
+                ..translateByDouble(dx, 0, 0, 1)
+                ..rotateY(angle)
+                ..scaleByDouble(scale, scale, 1, 1);
+
+              return Opacity(
+                opacity: inT.clamp(0.0, 1.0),
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: transform,
+                  child: child,
+                ),
+              );
+            },
           );
         },
       );

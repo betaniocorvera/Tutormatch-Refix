@@ -1,14 +1,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // How a person reads on their own page.
 //
-// One block: who they are, whether they are around, the facts of the profile,
-// and what they say about themselves. The match page draws it for the person
-// you matched with; the profile preview draws it for you. Sharing the widget
-// is the point — "how others see you" cannot drift from "how you are seen" if
-// it is the same code reading the same fields.
+// The header is a surface that leans towards the pointer on a wide screen — a
+// person is the one thing on this page you are deciding about, so their block
+// is allowed to lift. Everything under it is grouped in the order a reader
+// actually asks: where they are, who they are, what they teach, when they are
+// free, then the smaller facts.
 //
 // The block deliberately holds no comparison: no score, no reasons, no shared
-// week. Those belong to a pairing, not to a person.
+// week. Those belong to a pairing, not to a person. The one week it does draw is
+// that person's own availability, which is a fact about them.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:typed_data';
@@ -16,7 +17,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+import 'package:tutormatch/widgets/availability_grid.dart';
 import 'package:tutormatch/widgets/location_map.dart';
+import 'package:tutormatch/widgets/tilt_card.dart';
 import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_layout.dart';
 import 'package:tutormatch/widgets/tm_status.dart';
@@ -26,6 +29,8 @@ class PersonSummary extends StatelessWidget {
     required this.person,
     this.photo,
     this.distanceKm,
+    this.heroTag,
+    this.showAvailability = true,
     super.key,
   });
 
@@ -39,67 +44,169 @@ class PersonSummary extends StatelessWidget {
   /// Null on the profile preview, and whenever either side hides their area.
   final double? distanceKm;
 
+  /// Carries the avatar from the ranked card to this header. Shared by the
+  /// match page and its list so the person does not become a second drawing.
+  final Object? heroTag;
+
+  /// The match page already draws the shared week below its reasons; the
+  /// preview has no pairing to compare against, so it shows this week instead.
+  final bool showAvailability;
+
   @override
   Widget build(BuildContext context) {
     final bool hasBio = person.bio.trim().isNotEmpty;
     final PublicPlace? place = person.publicPlace;
+
+    final Widget header = TMEntry(
+      padding: const EdgeInsets.all(Space.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              TMAvatar(
+                person.name,
+                size: 92,
+                photo: photo,
+                tint: person.photoTint,
+                heroTag: heroTag,
+              ),
+              const SizedBox(width: Space.xl),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(person.name, style: AppType.pageTitle),
+                    if (person.headline.trim().isNotEmpty) ...<Widget>[
+                      const SizedBox(height: Space.sm),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560),
+                        child:
+                            Text(person.headline, style: AppType.bodyLarge.quiet),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.lg),
+          PersonStatusLine(
+            presence: person.presence,
+            statusText: person.statusText,
+          ),
+          const SizedBox(height: Space.md),
+          PersonFactLine(candidate: person),
+        ],
+      ),
+    );
+
+    final Widget head = TiltCard(maxTilt: 3, lift: 3, child: header);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            TMAvatar(person.name, size: 64, photo: photo, tint: person.photoTint),
-            const SizedBox(width: Space.lg),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(person.name, style: AppType.pageTitle),
-                  if (person.headline.trim().isNotEmpty) ...<Widget>[
-                    const SizedBox(height: Space.sm),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 560),
-                      child: Text(person.headline, style: AppType.bodyLarge.quiet),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: Space.lg),
-        PersonStatusLine(presence: person.presence, statusText: person.statusText),
-        const SizedBox(height: Space.lg),
-        PersonFactLine(candidate: person),
+        head,
         if (place != null) ...<Widget>[
           const SizedBox(height: Space.xxl),
           const TMRule(label: 'Approximate area'),
           const SizedBox(height: Space.lg),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
+            constraints: const BoxConstraints(maxWidth: 620),
             child: LocationCard(
               place: place,
               distanceKm: distanceKm,
-              height: 220,
+              height: 240,
             ),
           ),
         ],
         const SizedBox(height: Space.xxl),
-        const TMRule(label: 'In their own words'),
+        const TMRule(label: 'About'),
         const SizedBox(height: Space.lg),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
+          constraints: const BoxConstraints(maxWidth: 620),
           child: Text(
-            hasBio ? '“${person.bio}”' : 'No bio yet.',
+            hasBio
+                ? '“${person.bio}”'
+                : 'No bio yet — this person has not written one.',
             style: hasBio ? AppType.quote : AppType.bodyLarge.quieter,
           ),
         ),
         const SizedBox(height: Space.xxl),
-        PersonFacts(person: person),
+        const TMRule(label: 'Subjects'),
+        const SizedBox(height: Space.lg),
+        Wrap(
+          spacing: Space.sm,
+          runSpacing: Space.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            for (final String subject in person.subjects)
+              _SubjectTag(subject: subject),
+            Text('·', style: AppType.bodySmall.quieter),
+            Text(person.modeCopy, style: AppType.bodySmall.tone(AppColors.inkSecondary)),
+            Text('·', style: AppType.bodySmall.quieter),
+            Text(person.rateCopy, style: AppType.figure),
+            if (person.reviews > 0) ...<Widget>[
+              Text('·', style: AppType.bodySmall.quieter),
+              Text(
+                '${person.rating} from ${person.reviews}',
+                style: AppType.bodySmall.quieter,
+              ),
+            ],
+          ],
+        ),
+        if (showAvailability) ...<Widget>[
+          const SizedBox(height: Space.xl),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 470),
+            child: AvailabilityGrid(
+              overlap: person.availability,
+              cellHeight: 16,
+              partLabels: true,
+            ),
+          ),
+          const SizedBox(height: Space.sm),
+          Text(
+            'A normal week. Filled cells are hours they keep free.',
+            style: AppType.bodySmall.quieter,
+          ),
+        ],
         const SizedBox(height: Space.xxl),
-        PersonColumns(candidate: person),
+        PersonFacts(person: person),
+        if (_hasColumns(person)) ...<Widget>[
+          const SizedBox(height: Space.xxl),
+          PersonColumns(candidate: person),
+        ],
       ],
+    );
+  }
+
+  static bool _hasColumns(Candidate person) =>
+      person.styleLabel.trim().isNotEmpty ||
+      person.styleTags.isNotEmpty ||
+      person.credentials.isNotEmpty ||
+      person.languages.isNotEmpty ||
+      person.reviews > 0;
+}
+
+class _SubjectTag extends StatelessWidget {
+  const _SubjectTag({required this.subject});
+  final String subject;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.xs + 1),
+      decoration: BoxDecoration(
+        color: AppColors.paperRaised,
+        border: Border.all(color: AppColors.ruleStrong),
+        borderRadius: BorderRadius.circular(Radii.pill),
+      ),
+      child: Text(
+        subject,
+        style: AppType.bodySmall.tone(AppColors.inkSecondary),
+      ),
     );
   }
 }
@@ -136,7 +243,7 @@ class PersonStatusLine extends StatelessWidget {
 }
 
 /// The one-line summary: who they are on the market, what they teach or need,
-/// how they meet and at what rate. The place itself lives in [PersonFacts],
+/// how they meet and at what rate. The place itself lives in [LocationCard],
 /// where it can be read properly.
 class PersonFactLine extends StatelessWidget {
   const PersonFactLine({required this.candidate, super.key});
@@ -154,16 +261,6 @@ class PersonFactLine extends StatelessWidget {
           candidate.role == Role.tutor ? 'Tutor' : 'Student',
           style: AppType.bodySmall.tone(AppColors.inkMuted),
         ),
-        Text('·', style: AppType.bodySmall.quieter),
-        for (final String subject in candidate.subjects)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.xs + 1),
-            decoration: BoxDecoration(
-              border: Border.all(color: AppColors.ruleStrong),
-              borderRadius: BorderRadius.circular(Radii.sharp - 1),
-            ),
-            child: Text(subject, style: AppType.bodySmall.tone(AppColors.inkSecondary)),
-          ),
         Text('·', style: AppType.bodySmall.quieter),
         Text(candidate.modeCopy, style: AppType.bodySmall.quieter),
         Text('·', style: AppType.bodySmall.quieter),

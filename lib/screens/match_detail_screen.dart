@@ -8,13 +8,16 @@
 //
 // Two decisions worth defending:
 //
-//   * The self-description is set in Spectral italic. It is a quotation — the
-//     person talking about themselves — and it is the one place on an Operate
-//     screen where the serif earns its keep.
+//   * The self-description is a quotation — the person talking about themselves
+//     — set in the body face's italic, indented by a rule rather than wrapped
+//     in a decorative card.
 //   * Sending a request confirms INLINE, in the panel that held the form. A
 //     modal would interrupt, cover the reasons the person just read, and be
 //     dismissed before it was understood. The form is replaced by its own
 //     outcome, with a reference and the next step.
+//
+// On a phone the decision is never a scroll away: a pinned bar carries the score
+// and the next action, and the full form lives where the reasons end.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -42,6 +45,7 @@ class MatchDetailScreen extends StatefulWidget {
 
 class _MatchDetailScreenState extends State<MatchDetailScreen> {
   final TextEditingController _note = TextEditingController();
+  final GlobalKey _actionKey = GlobalKey();
   bool _sent = false;
   String? _noteError;
 
@@ -49,6 +53,17 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
   void dispose() {
     _note.dispose();
     super.dispose();
+  }
+
+  void _scrollToAction() {
+    final BuildContext? target = _actionKey.currentContext;
+    if (target == null) return;
+    Scrollable.ensureVisible(
+      target,
+      duration: Motion.respect(context, Motion.page),
+      curve: Motion.ease,
+      alignment: 0.04,
+    );
   }
 
   /// Deterministic, and computed from the characters rather than from
@@ -95,7 +110,6 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final AppState state = AppStateScope.of(context);
-    final bool wide = TMLayout.isWide(context);
 
     // Re-scored against the profile as it stands now, so a detail screen opened
     // before an availability change is not showing last week's arithmetic.
@@ -126,7 +140,15 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
         // The person block is shared with the profile preview, so the page a
         // tutor opens for a student and the page a student previews are the
         // same page — fields and all — rather than two drawings of one idea.
-        PersonSummary(person: c, distanceKm: result.distanceKm),
+        PersonSummary(
+          person: c,
+          distanceKm: result.distanceKm,
+          heroTag: 'avatar-${c.id}',
+          // The shared week below the reasons is the pairing's week. Drawing the
+          // person's own week here as well would show two grids of the same
+          // seven days and invite the reader to compare the wrong pair.
+          showAvailability: false,
+        ),
         const SizedBox(height: Space.xxl),
         const TMRule(label: 'Why you matched'),
         const SizedBox(height: Space.lg),
@@ -213,24 +235,25 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
         minHeight: Hit.min,
         onPressed: () => Navigator.of(context).pop(),
       ),
+      bottomBar: _DecisionBar(
+        score: result.score.total,
+        sent: _sent,
+        alreadyAsked: alreadyAsked,
+        askedByMe: chat?.requestedByMe ?? state.role == Role.student,
+        chat: chat,
+        student: state.role == Role.student,
+        onStartRequest: _scrollToAction,
+        onOpenMessages: () => Navigator.of(context).pushNamed(Routes.messages),
+        onOpenRequests: () => Navigator.of(context).pushNamed(Routes.requests),
+      ),
+      // The decision panel becomes the shell's sticky aside: beside the
+      // argument from 1120 px, after it below. That keeps the score and the
+      // request within reach without pinning a wall over a phone.
+      aside: KeyedSubtree(key: _actionKey, child: aside),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          SizedBox(height: Space.xxl),
-          if (wide)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(flex: 7, child: person),
-                const SizedBox(width: Space.huge),
-                SizedBox(width: TMLayout.asideWidth, child: aside),
-              ],
-            )
-          else ...<Widget>[
-            person,
-            SizedBox(height: Space.xxxl),
-            aside,
-          ],
+          person,
           const SizedBox(height: Space.huge),
         ],
       ),
@@ -274,6 +297,86 @@ class _Reason extends StatelessWidget {
             ],
           ),
         ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The pinned decision
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A phone-sized bar above the navigation. It carries the one number and the
+/// one next action, so the decision never depends on a scroll. The full request
+/// form still lives in the panel; this only takes you to it.
+class _DecisionBar extends StatelessWidget {
+  const _DecisionBar({
+    required this.score,
+    required this.sent,
+    required this.alreadyAsked,
+    required this.askedByMe,
+    required this.chat,
+    required this.student,
+    required this.onStartRequest,
+    required this.onOpenMessages,
+    required this.onOpenRequests,
+  });
+
+  final int score;
+  final bool sent;
+  final bool alreadyAsked;
+  final bool askedByMe;
+  final Conversation? chat;
+  final bool student;
+  final VoidCallback onStartRequest;
+  final VoidCallback onOpenMessages;
+  final VoidCallback onOpenRequests;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget action;
+    if (sent) {
+      action = TMButton(
+        label: 'Open your messages',
+        icon: TMIconName.arrowRight,
+        minHeight: Hit.min,
+        expand: true,
+        onPressed: onOpenMessages,
+      );
+    } else if (alreadyAsked) {
+      final bool useMessages = chat != null;
+      action = TMButton(
+        label: askedByMe
+            ? (useMessages ? 'Open messages' : 'Open requests')
+            : (useMessages ? 'Answer in Messages' : 'Read their request'),
+        variant: TMButtonVariant.secondary,
+        icon: TMIconName.arrowRight,
+        minHeight: Hit.min,
+        expand: true,
+        onPressed: useMessages ? onOpenMessages : onOpenRequests,
+      );
+    } else {
+      action = TMButton(
+        label: student ? 'Ask for a lesson' : 'Offer a lesson',
+        icon: TMIconName.arrowRight,
+        minHeight: Hit.min,
+        expand: true,
+        onPressed: onStartRequest,
+      );
+    }
+
+    return Row(
+      children: <Widget>[
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text('$score', style: AppType.scoreSmall),
+            Text('MATCH', style: AppType.micro.copyWith(fontSize: 8.5).quieter),
+          ],
+        ),
+        const SizedBox(width: Space.lg),
+        Expanded(child: action),
       ],
     );
   }
@@ -331,6 +434,8 @@ class _ActionPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          const TMMicroLabelText('The match'),
+          const SizedBox(height: Space.md),
           MatchScorePanel(
             score: result.score.total,
             trailing: TMStatusPill(tone: result.tier.tone, label: result.tier.label, dense: true),

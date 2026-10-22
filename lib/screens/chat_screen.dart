@@ -17,6 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -51,6 +52,13 @@ class _ChatScreenState extends State<ChatScreen> {
   /// side's, or the scripted answer's — puts the thread back at its foot.
   int _seen = -1;
 
+  /// Messages already on screen once. A bubble slides in only the first time it
+  /// appears in this session; scrolling back up does not replay the entrance.
+  final Set<int> _appeared = <int>{};
+
+  /// The composer draws its own focus edge around the field and its tools.
+  final FocusNode _composerFocus = FocusNode();
+
   /// The typing row appears and disappears without changing the message count,
   /// so it gets its own edge detector.
   bool _wasTyping = false;
@@ -76,8 +84,19 @@ class _ChatScreenState extends State<ChatScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _composerFocus.addListener(_onComposerFocus);
+  }
+
+  void _onComposerFocus() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
     _recordTimer?.cancel();
+    _composerFocus.dispose();
     _text.dispose();
     _scroll.dispose();
     super.dispose();
@@ -317,15 +336,12 @@ class _ChatScreenState extends State<ChatScreen> {
         RequestStatus.declined =>
           'Nothing was written here before the request closed.',
       };
-      return Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Text(
-            empty,
-            textAlign: TextAlign.center,
-            style: AppType.bodySmall.quieter,
-          ),
-        ),
+      return _EmptyThread(
+        name: c.counterpartName,
+        tint: candidateById(c.counterpartId)?.photoTint,
+        subject: c.subject,
+        role: c.counterpartRole,
+        message: empty,
       );
     }
 
@@ -358,22 +374,27 @@ class _ChatScreenState extends State<ChatScreen> {
                     message == lastMine
                 ? (seen ? 'Seen' : 'Sent')
                 : null;
+            final bool fresh = _appeared.add(identityHashCode(message));
             return Padding(
               padding: EdgeInsets.only(
                 bottom: i == count - 1 ? 0 : Space.lg,
               ),
-              child: _Bubble(
-                message: message,
-                name: c.counterpartName,
-                // Whoever the conversation is with, their avatar is drawn from
-                // the one pool row that knows what they look like.
-                tint: candidateById(c.counterpartId)?.photoTint,
-                delivery: delivery,
-                onOpenPhoto: _openPhoto,
-                onAnswerSession: message.id == null
-                    ? null
-                    : (SessionState answer) => AppStateScope.read(context)
-                        .answerSession(c.id, message.id!, answer),
+              child: _MessageArrival(
+                animate: fresh,
+                fromMe: message.fromMe,
+                child: _Bubble(
+                  message: message,
+                  name: c.counterpartName,
+                  // Whoever the conversation is with, their avatar is drawn from
+                  // the one pool row that knows what they look like.
+                  tint: candidateById(c.counterpartId)?.photoTint,
+                  delivery: delivery,
+                  onOpenPhoto: _openPhoto,
+                  onAnswerSession: message.id == null
+                      ? null
+                      : (SessionState answer) => AppStateScope.read(context)
+                          .answerSession(c.id, message.id!, answer),
+                ),
               ),
             );
           },
@@ -439,15 +460,44 @@ class _ChatScreenState extends State<ChatScreen> {
         color: AppColors.paper,
         border: Border(top: BorderSide(color: AppColors.rule)),
       ),
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: TMLayout.gutter(context),
-          vertical: Space.lg,
-        ),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: AppBreakpoints.maxContent),
-            child: body,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: TMLayout.gutter(context),
+            vertical: Space.lg,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: AppBreakpoints.maxContent),
+              child: AnimatedSize(
+                duration: Motion.respect(context, Motion.base),
+                curve: Motion.ease,
+                alignment: Alignment.bottomCenter,
+                child: AnimatedSwitcher(
+                  duration: Motion.respect(context, Motion.slow),
+                  switchInCurve: Motion.ease,
+                  switchOutCurve: Motion.ease,
+                  transitionBuilder: (Widget child, Animation<double> animation) {
+                    if (Motion.reduced(context)) return child;
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 0.06),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: KeyedSubtree(
+                    key: ValueKey<RequestStatus>(c.status),
+                    child: body,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -463,104 +513,131 @@ class _ChatScreenState extends State<ChatScreen> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (_pendingPhoto != null) ...<Widget>[
-          _photoDraft(context),
-          const SizedBox(height: Space.md),
-        ],
-        if (_emojiOpen) ...<Widget>[
-          _emojiPanel(context),
-          const SizedBox(height: Space.md),
-        ],
-        if (_attachOpen && compact) ...<Widget>[
-          _attachPanel(context),
-          const SizedBox(height: Space.md),
-        ],
-        if (_recording)
-          _recordingBar(context)
-        else
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: <Widget>[
-              if (compact)
-                _ChatIconButton(
-                  icon: TMIconName.plus,
-                  tooltip: 'More ways to send',
-                  active: _attachOpen || _emojiOpen,
-                  onTap: _toggleAttach,
-                )
-              else ...<Widget>[
-                _ChatIconButton(
-                  icon: TMIconName.image,
-                  tooltip: 'Send a photo',
-                  onTap: _pickPhoto,
-                ),
-                _ChatIconButton(
-                  icon: TMIconName.mic,
-                  tooltip: 'Record a voice note',
-                  onTap: _startRecording,
-                ),
-                _ChatIconButton(
-                  icon: TMIconName.calendar,
-                  tooltip: 'Propose a session',
-                  onTap: _proposeSession,
-                ),
-              ],
-              const SizedBox(width: Space.sm),
-              Expanded(child: _messageField()),
-              if (!compact) ...<Widget>[
-                const SizedBox(width: Space.sm),
-                _ChatIconButton(
-                  icon: TMIconName.emoji,
-                  tooltip: 'Insert an emoji',
-                  active: _emojiOpen,
-                  onTap: _toggleEmoji,
-                ),
-              ],
-              const SizedBox(width: Space.md),
-              TMButton(
-                label: 'Send',
-                icon: TMIconName.arrowRight,
-                minHeight: Hit.min,
-                onPressed: _text.text.trim().isEmpty ? null : _sendText,
-              ),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (_pendingPhoto != null) ...<Widget>[
+              _photoDraft(context),
+              const SizedBox(height: Space.md),
             ],
-          ),
+            if (_emojiOpen) ...<Widget>[
+              _emojiPanel(context),
+              const SizedBox(height: Space.md),
+            ],
+            if (_attachOpen && compact) ...<Widget>[
+              _attachPanel(context),
+              const SizedBox(height: Space.md),
+            ],
+          ],
+        ),
+        AnimatedSwitcher(
+          duration: Motion.respect(context, Motion.fast),
+          switchInCurve: Motion.ease,
+          switchOutCurve: Motion.ease,
+          child: _recording
+              ? KeyedSubtree(
+                  key: const ValueKey<String>('recording'),
+                  child: _recordingBar(context),
+                )
+              : KeyedSubtree(
+                  key: const ValueKey<String>('composer'),
+                  child: _composerRow(context, compact),
+                ),
+        ),
       ],
+    );
+  }
+
+  /// One surface for the field and its tools, with a single focus edge that
+  /// lights when either the field or a tool holds the keyboard.
+  Widget _composerRow(BuildContext context, bool compact) {
+    final bool focused = _composerFocus.hasFocus;
+
+    return AnimatedContainer(
+      duration: Motion.respect(context, Motion.fast),
+      curve: Motion.ease,
+      padding: const EdgeInsets.all(Space.xs),
+      decoration: BoxDecoration(
+        color: AppColors.paperRaised,
+        borderRadius: Radii.sharpAll,
+        border: Border.all(
+          color: focused ? AppColors.ink : AppColors.ruleStrong,
+          width: focused ? 1.5 : 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: <Widget>[
+          if (compact)
+            _ChatIconButton(
+              icon: TMIconName.plus,
+              tooltip: 'More ways to send',
+              active: _attachOpen || _emojiOpen,
+              onTap: _toggleAttach,
+            )
+          else ...<Widget>[
+            _ChatIconButton(
+              icon: TMIconName.image,
+              tooltip: 'Send a photo',
+              onTap: _pickPhoto,
+            ),
+            _ChatIconButton(
+              icon: TMIconName.mic,
+              tooltip: 'Record a voice note',
+              onTap: _startRecording,
+            ),
+            _ChatIconButton(
+              icon: TMIconName.calendar,
+              tooltip: 'Propose a session',
+              onTap: _proposeSession,
+            ),
+          ],
+          const SizedBox(width: Space.xs),
+          Expanded(child: _messageField()),
+          if (!compact)
+            _ChatIconButton(
+              icon: TMIconName.emoji,
+              tooltip: 'Insert an emoji',
+              active: _emojiOpen,
+              onTap: _toggleEmoji,
+            ),
+          const SizedBox(width: Space.sm),
+          TMButton(
+            label: 'Send',
+            icon: TMIconName.arrowRight,
+            minHeight: Hit.min,
+            onPressed: _text.text.trim().isEmpty ? null : _sendText,
+          ),
+        ],
+      ),
     );
   }
 
   Widget _messageField() {
     return TextField(
       controller: _text,
+      focusNode: _composerFocus,
       onChanged: (_) => setState(() {}),
       onSubmitted: (_) => _sendText(),
       textInputAction: TextInputAction.send,
       style: AppType.body,
+      cursorColor: AppColors.accent,
       cursorWidth: 1.5,
       cursorRadius: const Radius.circular(1),
-      decoration: InputDecoration(
+      decoration: const InputDecoration(
         isDense: true,
-        filled: true,
-        fillColor: AppColors.paperRaised,
+        filled: false,
         hintText: 'Write a message',
-        hintStyle: AppType.body.tone(AppColors.inkMuted),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: Space.lg,
-          vertical: Space.md,
+        hintStyle: TextStyle(color: AppColors.inkMuted),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: Space.sm,
+          vertical: 11,
         ),
-        constraints: const BoxConstraints(minHeight: Hit.min),
-        border: OutlineInputBorder(
-          borderRadius: Radii.sharpAll,
-          borderSide: const BorderSide(color: AppColors.ruleStrong),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: Radii.sharpAll,
-          borderSide: const BorderSide(color: AppColors.ruleStrong),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: Radii.sharpAll,
-          borderSide: const BorderSide(color: AppColors.ink, width: 2),
-        ),
+        constraints: BoxConstraints(minHeight: Hit.min),
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
       ),
     );
   }
@@ -712,12 +789,15 @@ class _ChatScreenState extends State<ChatScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Padding(
-                padding: EdgeInsets.symmetric(
+              Padding(
+                padding: const EdgeInsets.symmetric(
                   horizontal: Space.sm,
                   vertical: Space.xs,
                 ),
-                child: TMMicroLabelText('Emoji'),
+                child: Text(
+                  'EMOJI',
+                  style: AppType.micro.tone(AppColors.inkMuted),
+                ),
               ),
               const Spacer(),
               _ChatIconButton(
@@ -845,15 +925,15 @@ class _ChatHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final Conversation c = conversation;
     final bool accepted = c.status == RequestStatus.accepted;
+    final bool compact = TMLayout.isCompact(context);
     final PublicPlace? counterpartPlace =
         candidateById(c.counterpartId)?.publicPlace;
-    // The status pill is redundant once an accepted thread is open, and on a
-    // phone the two call buttons are worth more than the label.
-    final bool showPill = !accepted || !TMLayout.isCompact(context);
+    // On a phone the header earns its height by keeping the call actions and
+    // dropping the accepted label; the footer states the status anyway.
 
     return DecoratedBox(
       decoration: const BoxDecoration(
-        color: AppColors.paper,
+        color: AppColors.paperRaised,
         border: Border(bottom: BorderSide(color: AppColors.rule)),
       ),
       child: Center(
@@ -862,7 +942,7 @@ class _ChatHeader extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.symmetric(
               horizontal: TMLayout.gutter(context),
-              vertical: Space.md,
+              vertical: Space.sm + 2,
             ),
             child: Row(
               children: <Widget>[
@@ -883,23 +963,29 @@ class _ChatHeader extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Text(
-                        c.counterpartName,
-                        style: AppType.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          c.counterpartName,
+                          style: AppType.sectionTitle.copyWith(fontSize: 19.5),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${c.subject} · ${c.counterpartRole == Role.tutor ? 'Tutor' : 'Student'}',
-                        style: AppType.bodySmall.quieter,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (counterpartPlace != null) ...<Widget>[
-                        const SizedBox(height: 1),
-                        Row(
-                          children: <Widget>[
+                      const SizedBox(height: 1),
+                      Row(
+                        children: <Widget>[
+                          Flexible(
+                            child: Text(
+                              '${c.subject} · '
+                              '${c.counterpartRole == Role.tutor ? 'Tutor' : 'Student'}',
+                              style: AppType.bodySmall.quieter,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (counterpartPlace != null && !compact) ...<Widget>[
+                            const SizedBox(width: Space.sm),
                             const TMIcon(
                               TMIconName.pin,
                               size: 11,
@@ -915,31 +1001,57 @@ class _ChatHeader extends StatelessWidget {
                               ),
                             ),
                           ],
+                        ],
+                      ),
+                      // On a phone the area moves to its own line rather than
+                      // disappearing: the allowed public area is part of what
+                      // both sides agreed to share, and a narrower window is
+                      // not a reason to hide it.
+                      if (counterpartPlace != null && compact) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Row(
+                          children: <Widget>[
+                            const TMIcon(
+                              TMIconName.pin,
+                              size: 10,
+                              color: AppColors.inkMuted,
+                            ),
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Text(
+                                counterpartPlace.label,
+                                style: AppType.micro
+                                    .copyWith(fontSize: 9.5)
+                                    .tone(AppColors.inkMuted),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ],
                   ),
                 ),
-                if (showPill) ...<Widget>[
-                  const SizedBox(width: Space.md),
-                  TMStatusPill(
-                    tone: c.status.tone,
-                    label: c.status.label,
-                    dense: true,
-                  ),
-                ],
                 if (accepted) ...<Widget>[
-                  const SizedBox(width: Space.sm),
+                  const SizedBox(width: Space.xs),
                   _ChatIconButton(
                     icon: TMIconName.phone,
                     tooltip: 'Start a voice call',
                     onTap: () => onCall(CallKind.voice),
                   ),
-                  const SizedBox(width: Space.xs),
+                  const SizedBox(width: Space.xxs),
                   _ChatIconButton(
                     icon: TMIconName.video,
                     tooltip: 'Start a video call',
                     onTap: () => onCall(CallKind.video),
+                  ),
+                ] else ...<Widget>[
+                  const SizedBox(width: Space.sm),
+                  TMStatusPill(
+                    tone: c.status.tone,
+                    label: c.status.label,
+                    dense: true,
                   ),
                 ],
               ],
@@ -1006,8 +1118,168 @@ class _ChatIconButton extends StatelessWidget {
   }
 }
 
-/// One message and its time. Mine on the accent at the right; theirs on
-/// sunken paper at the left, with the avatar that says who is talking.
+/// The asymmetric corner that gives a message a direction: the side the bubble
+/// belongs to has the soft 12 px corner, the side nearest the other person has a
+/// 3 px notch. Everything else in the product stays on [Radii.sharpAll].
+BorderRadius _bubbleRadius(bool mine) => BorderRadius.only(
+      topLeft: const Radius.circular(Radii.sharp),
+      topRight: const Radius.circular(Radii.sharp),
+      bottomLeft: Radius.circular(mine ? Radii.sharp : 3),
+      bottomRight: Radius.circular(mine ? 3 : Radii.sharp),
+    );
+
+/// One message arriving. It travels 10 px from the side it belongs to and fades
+/// in over 250 ms; only the first appearance in this session, never on scroll.
+class _MessageArrival extends StatefulWidget {
+  const _MessageArrival({
+    required this.child,
+    required this.fromMe,
+    required this.animate,
+  });
+
+  final Widget child;
+  final bool fromMe;
+  final bool animate;
+
+  @override
+  State<_MessageArrival> createState() => _MessageArrivalState();
+}
+
+class _MessageArrivalState extends State<_MessageArrival>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: Motion.slow,
+  );
+  bool _still = false;
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _still = !widget.animate || Motion.reduced(context);
+    if (_still) {
+      _c.value = 1;
+    } else {
+      _c.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_still) return widget.child;
+
+    return AnimatedBuilder(
+      animation: _c,
+      child: widget.child,
+      builder: (BuildContext context, Widget? child) {
+        final double t = Motion.ease.transform(_c.value);
+        return Opacity(
+          opacity: t.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset((1 - t) * (widget.fromMe ? 10 : -10), 4 * (1 - t)),
+            child: Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.identity()
+                ..setEntry(3, 2, 0.0012)
+                ..rotateX((1 - t) * 6 * math.pi / 180),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The empty thread: the person, what the thread is about, and the one sentence
+/// that says why there is nothing here yet. The composer sits below it when the
+/// request is accepted.
+class _EmptyThread extends StatelessWidget {
+  const _EmptyThread({
+    required this.name,
+    required this.subject,
+    required this.role,
+    required this.message,
+    this.tint,
+  });
+
+  final String name;
+  final String subject;
+  final Role role;
+  final String message;
+  final Color? tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.symmetric(
+          horizontal: TMLayout.gutter(context),
+          vertical: Space.xxl,
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              TMAvatar(name, size: 64, tint: tint),
+              const SizedBox(height: Space.lg),
+              Text(
+                name,
+                textAlign: TextAlign.center,
+                style: AppType.titleLarge,
+              ),
+              const SizedBox(height: Space.xs),
+              Text(
+                '$subject · ${role == Role.tutor ? 'Tutor' : 'Student'}',
+                textAlign: TextAlign.center,
+                style: AppType.bodySmall.quieter,
+              ),
+              const SizedBox(height: Space.xl),
+              Container(
+                padding: const EdgeInsets.all(Space.lg),
+                decoration: BoxDecoration(
+                  color: AppColors.paperRaised,
+                  border: Border.all(color: AppColors.rule),
+                  borderRadius: Radii.sharpAll,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2, right: Space.md),
+                      child: TMIcon(
+                        TMIconName.chat,
+                        size: 17,
+                        color: AppColors.inkMuted,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        message,
+                        style: AppType.body.quiet,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Bubble extends StatelessWidget {
   const _Bubble({
     required this.message,
@@ -1105,14 +1377,16 @@ class _Bubble extends StatelessWidget {
 
   Widget _textBubble() {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: Space.lg,
-        vertical: Space.md,
+      padding: const EdgeInsets.fromLTRB(
+        Space.lg,
+        Space.md - 1,
+        Space.lg,
+        Space.md - 1,
       ),
       decoration: BoxDecoration(
-        color: _mine ? AppColors.accent : AppColors.paperSunken,
+        color: _mine ? AppColors.accent : AppColors.paperRaised,
         border: _mine ? null : Border.all(color: AppColors.rule),
-        borderRadius: Radii.sharpAll,
+        borderRadius: _bubbleRadius(_mine),
       ),
       child: Text(
         message.text,
@@ -1263,9 +1537,9 @@ class _VoiceBubbleState extends State<_VoiceBubble>
         bottom: Space.xs,
       ),
       decoration: BoxDecoration(
-        color: mine ? AppColors.accent : AppColors.paperSunken,
+        color: mine ? AppColors.accent : AppColors.paperRaised,
         border: mine ? null : Border.all(color: AppColors.rule),
-        borderRadius: Radii.sharpAll,
+        borderRadius: _bubbleRadius(mine),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1475,7 +1749,16 @@ class _TypingBubbleState extends State<_TypingBubble>
   late final AnimationController _dots = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 900),
-  )..repeat();
+  );
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (!Motion.reduced(context)) _dots.repeat();
+  }
 
   @override
   void dispose() {
@@ -1485,6 +1768,7 @@ class _TypingBubbleState extends State<_TypingBubble>
 
   @override
   Widget build(BuildContext context) {
+    final bool still = Motion.reduced(context);
     return Semantics(
       label: '${widget.name} is typing',
       child: ExcludeSemantics(
@@ -1502,9 +1786,9 @@ class _TypingBubbleState extends State<_TypingBubble>
                 vertical: Space.md,
               ),
               decoration: BoxDecoration(
-                color: AppColors.paperSunken,
+                color: AppColors.paperRaised,
                 border: Border.all(color: AppColors.rule),
-                borderRadius: Radii.sharpAll,
+                borderRadius: _bubbleRadius(false),
               ),
               child: AnimatedBuilder(
                 animation: _dots,
@@ -1520,7 +1804,7 @@ class _TypingBubbleState extends State<_TypingBubble>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: AppColors.inkMuted.withValues(
-                              alpha: 0.25 + 0.75 * _pulse(i),
+                              alpha: still ? 0.55 : 0.25 + 0.75 * _pulse(i),
                             ),
                           ),
                         ),

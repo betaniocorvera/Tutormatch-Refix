@@ -36,12 +36,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   image_picker: ^1.2.4
   flutter_map: ^8.3.2
-
-  # No font package. The two faces this product is set in are bundled, below:
-  # shipping them is smaller than the packages that fetch them, they render on
-  # the first frame instead of after a round trip to fonts.gstatic.com, and the
-  # interface works with no network at all — which matters for a prototype that
-  # is often opened on a train.
+  # Every face is bundled below. Shipping them is smaller than the packages
+  # that fetch them, they render on the first frame instead of after a round
+  # trip to fonts.gstatic.com, and the interface works with no network at all —
+  # which matters for a prototype that is often opened on a train.
 
 dev_dependencies:
   flutter_test:
@@ -65,30 +63,32 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # The two faces. Both are OFL-1.1; the licences sit beside them in the same
-  # folder, which is what the licence asks for and what a person auditing this
-  # repo will look for.
+  # The text faces are OFL-1.1; the licences sit beside them. Bricolage and
+  # Figtree are variable cuts, so the type scale sets their `wght` axes
+  # explicitly in lib/theme/app_theme.dart. IBM Plex Mono ships as the two
+  # static weights the instrument scale needs.
   #
-  # Spectral is published as static instances rather than one variable file, so
-  # each weight that the type scale uses is declared explicitly, with the italic
-  # as its own entry.
-  # Public Sans ships as a single variable file and the weight is applied through
-  # the `wght` axis in lib/theme/app_theme.dart (`fontVariations`), because a
-  # variable font's default instance is Regular and the `weight:` hint below
-  # would otherwise only ever select Regular.
+  # The two Phosphor cuts are separate: the regular carries normal UI marks,
+  # the bold only the smallest marks inside status pills. Phosphor is MIT.
   fonts:
-    - family: Spectral
+    - family: Bricolage Grotesque
       fonts:
-        - asset: assets/fonts/Spectral-Regular.ttf
-        - asset: assets/fonts/Spectral-Italic.ttf
-          style: italic
-        - asset: assets/fonts/Spectral-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/Spectral-Bold.ttf
-          weight: 700
-    - family: Public Sans
+        - asset: assets/fonts/BricolageGrotesque-Variable.ttf
+    - family: Figtree
       fonts:
-        - asset: assets/fonts/PublicSans-Variable.ttf
+        - asset: assets/fonts/Figtree-Variable.ttf
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500
+    - family: PhosphorRegular
+      fonts:
+        - asset: assets/fonts/PhosphorRegular.ttf
+    - family: PhosphorBold
+      fonts:
+        - asset: assets/fonts/PhosphorBold.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

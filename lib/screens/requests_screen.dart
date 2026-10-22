@@ -20,6 +20,7 @@ import 'package:tutormatch/widgets/tm_button.dart';
 import 'package:tutormatch/widgets/tm_empty_state.dart';
 import 'package:tutormatch/widgets/tm_icon.dart';
 import 'package:tutormatch/widgets/tm_layout.dart';
+import 'package:tutormatch/widgets/tm_motion.dart';
 import 'package:tutormatch/widgets/tm_status.dart';
 
 class RequestsScreen extends StatefulWidget {
@@ -77,7 +78,6 @@ class _RequestsScreenState extends State<RequestsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const SizedBox(height: Space.xxl),
           Text(
             student ? 'Requests you have sent' : 'Requests you have received',
             style: AppType.pageTitle,
@@ -110,17 +110,64 @@ class _RequestsScreenState extends State<RequestsScreen> {
             onSelect: (RequestStatus s) => setState(() => _tab = s),
           ),
           const SizedBox(height: Space.xxl),
-          if (shown.isEmpty)
-            _emptyFor(_tab, student)
-          else
-            for (int i = 0; i < shown.length; i++) ...<Widget>[
-              if (i > 0) const SizedBox(height: Space.lg),
-              _RequestEntry(
-                request: shown[i],
-                student: student,
-                onOpenProfile: () => _openProfile(context, state, shown[i]),
+          AnimatedSize(
+            duration: Motion.respect(context, Motion.page),
+            curve: Motion.ease,
+            alignment: Alignment.topCenter,
+            child: AnimatedSwitcher(
+              duration: Motion.respect(context, Motion.page),
+              switchInCurve: Motion.ease,
+              switchOutCurve: Motion.ease,
+              layoutBuilder:
+                  (Widget? currentChild, List<Widget> previousChildren) {
+                return Stack(
+                  alignment: Alignment.topCenter,
+                  children: <Widget>[
+                    ...previousChildren,
+                    ?currentChild,
+                  ],
+                );
+              },
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                if (Motion.reduced(context)) return child;
+                final Animation<Offset> slide = Tween<Offset>(
+                  begin: const Offset(0.018, 0),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(parent: animation, curve: Motion.ease),
+                );
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(position: slide, child: child),
+                );
+              },
+              child: KeyedSubtree(
+                key: ValueKey<RequestStatus>(_tab),
+                child: shown.isEmpty
+                    ? _emptyFor(_tab, student)
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          for (int i = 0; i < shown.length; i++) ...<Widget>[
+                            if (i > 0) const SizedBox(height: Space.lg),
+                            TMReveal(
+                              key: ValueKey<String>(
+                                'request-${shown[i].id}',
+                              ),
+                              delay: Motion.stagger * (i < 5 ? i : 5),
+                              child: _RequestEntry(
+                                request: shown[i],
+                                student: student,
+                                onOpenProfile: () =>
+                                    _openProfile(context, state, shown[i]),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
               ),
-            ],
+            ),
+          ),
           const SizedBox(height: Space.huge),
         ],
       ),
@@ -263,7 +310,9 @@ class _Tab extends StatelessWidget {
         return TMFocusRing(
           focused: s.focused,
           radius: 0,
-          child: Container(
+          child: AnimatedContainer(
+            duration: Motion.respect(context, Motion.fast),
+            curve: Motion.ease,
             constraints: const BoxConstraints(minHeight: 52),
             padding: EdgeInsets.symmetric(
               horizontal: TMLayout.isCompact(context) ? Space.sm : Space.lg,

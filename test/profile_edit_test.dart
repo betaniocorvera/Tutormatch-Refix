@@ -263,7 +263,9 @@ void main() {
     await tapLabel(tester, 'Remove picture');
 
     expect(state.photo, isNull);
-    expect(find.text('MC'), findsOneWidget);
+    // The initials return both on the profile header and in the picture
+    // picker's own preview.
+    expect(find.text('MC'), findsWidgets);
     expect(find.text('Add a picture'), findsOneWidget);
   });
 }
@@ -278,11 +280,16 @@ Future<void> _loadBundledFonts() async {
     await loader.load();
   }
 
-  await family('Spectral', <String>[
-    'assets/fonts/Spectral-Regular.ttf',
-    'assets/fonts/Spectral-Italic.ttf',
-    'assets/fonts/Spectral-SemiBold.ttf',
-    'assets/fonts/Spectral-Bold.ttf',
+  await family('Bricolage Grotesque', <String>[
+    'assets/fonts/BricolageGrotesque-Variable.ttf',
   ]);
-  await family('Public Sans', <String>['assets/fonts/PublicSans-Variable.ttf']);
+  await family('Figtree', <String>['assets/fonts/Figtree-Variable.ttf']);
+  await family('IBM Plex Mono', <String>[
+    'assets/fonts/IBMPlexMono-Regular.ttf',
+    'assets/fonts/IBMPlexMono-Medium.ttf',
+  ]);
+  await family('PhosphorRegular', <String>[
+    'assets/fonts/PhosphorRegular.ttf',
+  ]);
+  await family('PhosphorBold', <String>['assets/fonts/PhosphorBold.ttf']);
 }

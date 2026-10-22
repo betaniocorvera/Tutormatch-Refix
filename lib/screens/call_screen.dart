@@ -153,10 +153,30 @@ class _CallScreenState extends State<CallScreen> {
           style: AppType.micro.tone(AppColors.inkMuted),
         ),
         const Spacer(),
-        Text(
-          _connected ? 'CONNECTED' : 'RINGING',
-          style: AppType.micro.tone(
-            _connected ? AppColors.accepted : AppColors.pending,
+        AnimatedSwitcher(
+          duration: Motion.respect(context, Motion.base),
+          switchInCurve: Motion.ease,
+          switchOutCurve: Motion.ease,
+          child: Row(
+            key: ValueKey<bool>(_connected),
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 6,
+                height: 6,
+                margin: const EdgeInsets.only(right: Space.sm),
+                decoration: BoxDecoration(
+                  color: _connected ? AppColors.accepted : AppColors.pending,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Text(
+                _connected ? 'CONNECTED' : 'RINGING',
+                style: AppType.micro.tone(
+                  _connected ? AppColors.accepted : AppColors.pending,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -260,23 +280,40 @@ class _CallScreenState extends State<CallScreen> {
         onInk ? AppColors.onInkQuiet : AppColors.inkSecondary;
     final Color bright = onInk ? AppColors.onAccent : AppColors.ink;
 
-    if (!_connected) {
-      return Text(
-        'Calling...',
-        style: AppType.bodyLarge.tone(quiet),
-      );
-    }
+    final Widget content = _connected
+        ? Column(
+            key: const ValueKey<String>('connected'),
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text('Connected', style: AppType.bodySmall.tone(quiet)),
+              const SizedBox(height: Space.xs),
+              Text(
+                elapsedClock(Duration(seconds: _seconds)),
+                style: AppType.figureLarge.tone(bright),
+              ),
+            ],
+          )
+        : Text(
+            'Calling...',
+            key: const ValueKey<String>('calling'),
+            style: AppType.bodyLarge.tone(quiet),
+          );
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Text('Connected', style: AppType.bodySmall.tone(quiet)),
-        const SizedBox(height: Space.xs),
-        Text(
-          elapsedClock(Duration(seconds: _seconds)),
-          style: AppType.figureLarge.tone(bright),
-        ),
-      ],
+    return AnimatedSwitcher(
+      duration: Motion.respect(context, Motion.base),
+      switchInCurve: Motion.ease,
+      switchOutCurve: Motion.ease,
+      transitionBuilder: (Widget child, Animation<double> animation) {
+        if (Motion.reduced(context)) return child;
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.98, end: 1).animate(animation),
+            child: child,
+          ),
+        );
+      },
+      child: content,
     );
   }
 
@@ -419,7 +456,7 @@ class _CallButton extends StatelessWidget {
         semanticLabel: tooltip,
         builder: (BuildContext context, TMState s) {
           final Color fill = danger
-              ? (s.pressed ? AppColors.accentPressed : AppColors.accent)
+              ? (s.pressed ? AppColors.ink : AppColors.alert)
               : selected
                   ? AppColors.ink
                   : s.hovered
@@ -440,7 +477,7 @@ class _CallButton extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: danger
-                      ? AppColors.accent
+                      ? AppColors.alert
                       : selected
                           ? AppColors.ink
                           : AppColors.ruleStrong,

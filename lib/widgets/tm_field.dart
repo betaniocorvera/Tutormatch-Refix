@@ -81,6 +81,8 @@ class TMTextField extends StatefulWidget {
     this.autofocus = false,
     this.maxLines = 1,
     this.semanticHint,
+    this.leadingIcon,
+    this.trailing,
     super.key,
   });
 
@@ -99,6 +101,14 @@ class TMTextField extends StatefulWidget {
   final int maxLines;
   final String? semanticHint;
 
+  /// A mark inside the field, for a field whose job is a verb rather than a
+  /// label: search is the only one today.
+  final TMIconName? leadingIcon;
+
+  /// A control at the end of the field. Ignored when [obscure] is true, because
+  /// the password reveal already owns that position.
+  final Widget? trailing;
+
   @override
   State<TMTextField> createState() => _TMTextFieldState();
 }
@@ -106,6 +116,7 @@ class TMTextField extends StatefulWidget {
 class _TMTextFieldState extends State<TMTextField> {
   late final FocusNode _node = FocusNode(debugLabel: widget.label);
   bool _focused = false;
+  bool _revealed = false;
 
   @override
   void initState() {
@@ -136,7 +147,7 @@ class _TMTextFieldState extends State<TMTextField> {
         TextField(
           focusNode: _node,
           controller: widget.controller,
-          obscureText: widget.obscure,
+          obscureText: widget.obscure && !_revealed,
           keyboardType: widget.keyboardType,
           textInputAction: widget.textInputAction,
           onChanged: widget.onChanged,
@@ -152,11 +163,70 @@ class _TMTextFieldState extends State<TMTextField> {
             fillColor: AppColors.paperRaised,
             hintText: widget.hint,
             hintStyle: AppType.body.tone(AppColors.inkMuted),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: Space.lg,
-              vertical: Space.lg,
+            contentPadding: EdgeInsets.fromLTRB(
+              widget.leadingIcon == null ? Space.lg : Space.sm,
+              Space.lg,
+              widget.obscure ? Space.sm : Space.lg,
+              Space.lg,
             ),
             constraints: const BoxConstraints(minHeight: Hit.min),
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 44,
+              minHeight: 44,
+            ),
+            prefixIcon: widget.leadingIcon == null
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.only(
+                      left: Space.md,
+                      right: Space.xs,
+                    ),
+                    child: TMIcon(
+                      widget.leadingIcon!,
+                      size: 19,
+                      color: _focused ? AppColors.accent : AppColors.inkMuted,
+                    ),
+                  ),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+            ),
+            suffixIcon: widget.trailing != null && !widget.obscure
+                ? Padding(
+                    padding: const EdgeInsets.only(right: Space.xs),
+                    child: widget.trailing,
+                  )
+                : widget.obscure
+                ? Padding(
+                    padding: const EdgeInsets.only(right: Space.xs),
+                    child: Tooltip(
+                      message: _revealed ? 'Hide password' : 'Show password',
+                      child: TMFocusable(
+                        onTap: () => setState(() => _revealed = !_revealed),
+                        semanticLabel:
+                            _revealed ? 'Hide password' : 'Show password',
+                        builder: (BuildContext context, TMState s) =>
+                            TMFocusRing(
+                          focused: s.focused,
+                          radius: Radii.sharp,
+                          child: SizedBox(
+                            width: Hit.min,
+                            height: Hit.min,
+                            child: Center(
+                              child: TMIcon(
+                                _revealed ? TMIconName.eyeOff : TMIconName.eye,
+                                size: 18,
+                                color: s.hovered || s.focused
+                                    ? AppColors.ink
+                                    : AppColors.inkMuted,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : null,
             border: OutlineInputBorder(
               borderRadius: Radii.sharpAll,
               borderSide: BorderSide(color: line),
@@ -611,6 +681,8 @@ class TMSegmented<T> extends StatelessWidget {
     required this.onSelect,
     required this.labelOf,
     this.expand = true,
+    this.height,
+    this.showDividers = true,
     super.key,
   });
 
@@ -619,6 +691,15 @@ class TMSegmented<T> extends StatelessWidget {
   final ValueChanged<T> onSelect;
   final String Function(T) labelOf;
   final bool expand;
+
+  /// Overrides the segment height. Null keeps the 44 px touch minimum and lets
+  /// the text and padding choose the height. A fixed height is useful for a
+  /// compact view switch that must not move the page around it.
+  final double? height;
+
+  /// Selectable filters can use a divider between options; a compact two-way
+  /// view switch reads better as one filled surface with no internal rules.
+  final bool showDividers;
 
   @override
   Widget build(BuildContext context) {
@@ -630,29 +711,40 @@ class TMSegmented<T> extends StatelessWidget {
             label: labelOf(option),
             selected: option == selected,
             onTap: () => onSelect(option),
+            height: height,
           ),
         ),
     ];
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: Radii.sharpAll,
-        border: Border.all(color: AppColors.ruleStrong),
-        color: AppColors.paperRaised,
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(Radii.sharp - 1),
-        child: Row(
-          children: <Widget>[
-            for (int i = 0; i < children.length; i++) ...<Widget>[
-              if (i > 0)
-                const SizedBox(
-                  height: Hit.min,
-                  child: VerticalDivider(width: 1, thickness: 1, color: AppColors.ruleStrong),
-                ),
-              children[i],
+    return SizedBox(
+      height: height,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: Radii.sharpAll,
+          border: Border.all(color: AppColors.ruleStrong),
+          color: AppColors.paperRaised,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(Radii.sharp - 1),
+          child: Row(
+            crossAxisAlignment: height == null
+                ? CrossAxisAlignment.center
+                : CrossAxisAlignment.stretch,
+            children: <Widget>[
+              for (int i = 0; i < children.length; i++) ...<Widget>[
+                if (i > 0 && showDividers)
+                  SizedBox(
+                    height: height ?? Hit.min,
+                    child: const VerticalDivider(
+                      width: 1,
+                      thickness: 1,
+                      color: AppColors.ruleStrong,
+                    ),
+                  ),
+                children[i],
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -660,11 +752,17 @@ class TMSegmented<T> extends StatelessWidget {
 }
 
 class _Segment extends StatelessWidget {
-  const _Segment({required this.label, required this.selected, required this.onTap});
+  const _Segment({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.height,
+  });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
@@ -675,11 +773,20 @@ class _Segment extends StatelessWidget {
       semanticSelected: selected,
       builder: (BuildContext context, TMState s) {
         return AnimatedContainer(
-          duration: Motion.fast,
+          duration: Motion.respect(context, Motion.fast),
           curve: Motion.ease,
-          constraints: const BoxConstraints(minHeight: Hit.min),
+          height: height,
+          constraints: height == null
+              ? const BoxConstraints(minHeight: Hit.min)
+              : null,
           alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: Space.md),
+          padding: EdgeInsets.symmetric(
+            horizontal: Space.md,
+            // A fixed-height view switch is tighter than the large filter
+            // segments, so its label is centred instead of being pushed past
+            // the height by the default vertical padding.
+            vertical: height == null ? Space.md : 0,
+          ),
           color: selected
               ? AppColors.accent
               : s.hovered
@@ -688,6 +795,8 @@ class _Segment extends StatelessWidget {
           child: Text(
             label,
             textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: AppType.labelSmall.tone(
               selected ? AppColors.onAccent : AppColors.inkSecondary,
             ).copyWith(fontWeight: selected ? FontWeight.w600 : FontWeight.w500),

@@ -1,28 +1,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// THE MATCH RESULT CARD — the signature component, and the thing this whole
-// interface exists to show well.
+// THE MATCH RESULT CARD — the signature component.
 //
-// Every design decision in it is a decision about reading order:
+// Reading order is the design:
+//   1. Who, how close, and the one word for it. The tier is read before the
+//      number because a word is faster than a figure.
+//   2. The score as an instrument: a ring that fills once and counts with it.
+//   3. Three reasons, each with the dimension's own mark. No click required.
+//   4. The week, because agreement in principle is worthless until you know
+//      when. Filled cells only.
 //
-//   1. Who, and how well. The rank sits in the corner as a figure, the name is
-//      in the serif because a person is the subject of the entry, and the tier
-//      word ("Strong match") appears before any number, because a word is
-//      processed faster than a value.
-//   2. The score as a measurement. The ruler is the second largest thing on the
-//      card and it is countable: ten graduations, a filled fraction, and a
-//      cursor on the exact value. See match_score_scale.dart.
-//   3. The three reasons, in full, without a click. This is the requirement the
-//      card is really built around — if a person has to open anything to find
-//      out why, the score is a black box and the product has failed. The three
-//      shown are always the three highest-weighted dimensions for this pairing,
-//      so they change with the profile rather than being decoration.
-//   4. The week grid, because "we agree in principle" is worth nothing until you
-//      know when. Filled cells only: this card answers "when are we both free",
-//      and the profile screen answers "who is free when".
-//
-// The top-ranked entry is given a deliberate lead treatment — an accent rule
-// across its top edge and a larger score — so a list of sixteen entries reads as
-// a ranking rather than a wall.
+// The first result is given amber rather than a bigger shadow: the lead is a
+// ranking fact, not a decoration. Every other card earns its place with rhythm
+// and hairlines alone.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -30,6 +19,7 @@ import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/availability_grid.dart';
 import 'package:tutormatch/widgets/match_score_scale.dart';
+import 'package:tutormatch/widgets/tilt_card.dart';
 import 'package:tutormatch/widgets/tm_avatar.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
 import 'package:tutormatch/widgets/tm_icon.dart';
@@ -53,19 +43,11 @@ class MatchResultCard extends StatelessWidget {
   final MatchResult result;
   final int rank;
   final bool lead;
-
-  /// Shows the "based on your profile" tag. True for anyone who has just
-  /// answered the onboarding questions, because their answers are the thing
-  /// producing this order and it would be dishonest to hide that.
   final bool fromProfile;
   final String? profileSummary;
-
   final VoidCallback? onOpen;
   final VoidCallback? onQuickRequest;
   final bool requested;
-
-  /// How many candidates were ranked in total, so "01" reads as "first of
-  /// sixteen" rather than as a number floating in a corner.
   final int total;
 
   @override
@@ -76,29 +58,30 @@ class MatchResultCard extends StatelessWidget {
     final Widget identity = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        _Header(
-          rank: rank,
-          total: total,
-          tier: result.tier,
-          lead: lead,
-          fromProfile: fromProfile,
-          profileSummary: profileSummary,
-        ),
-        SizedBox(height: lead ? Space.lg : Space.md),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            TMAvatar(c.name, size: lead ? 56 : 44, tint: c.photoTint),
+            TMAvatar(
+              c.name,
+              size: lead ? 56 : 46,
+              tint: c.photoTint,
+              heroTag: 'avatar-${c.id}',
+            ),
             const SizedBox(width: Space.lg),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(c.name, style: lead ? AppType.titleLarge : AppType.name),
+                  Text(
+                    c.name,
+                    style: lead ? AppType.titleLarge : AppType.name,
+                  ),
                   const SizedBox(height: Space.xs + 2),
-                  SizedBox(
-                    width: 460,
-                    child: Text(c.headline, style: AppType.body.quiet),
+                  Text(
+                    c.headline,
+                    style: AppType.body.quiet,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -107,127 +90,137 @@ class MatchResultCard extends StatelessWidget {
         ),
         const SizedBox(height: Space.lg),
         _Facts(result: result),
-      ],
-    );
-
-    // Whether the card splits into two columns is decided by the card's own
-    // width, not the window's: the same card sits in a full-width list and in a
-    // narrow hero column, and it has to hold in both.
-    Widget scoreBlock(bool wide) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const TMRule(label: 'Match'),
-            const SizedBox(height: Space.lg),
-            MatchScorePanel(
-              score: result.score.total,
-              large: lead,
-              showMeaning: wide,
-            ),
-          ],
-        );
-
-    final Widget reasons = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        const TMRule(label: 'Why this match'),
         const SizedBox(height: Space.lg),
+        const SizedBox(height: 1, child: ColoredBox(color: AppColors.rule)),
+        const SizedBox(height: Space.md),
         for (int i = 0; i < result.reasons.length; i++) ...<Widget>[
-          if (i > 0) const SizedBox(height: Space.lg),
-          _Reason(index: i + 1, note: result.reasons[i]),
+          if (i > 0) const SizedBox(height: Space.sm),
+          _Reason(note: result.reasons[i]),
         ],
       ],
     );
 
-    final Widget week = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final Widget scoreBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        const TMRule(label: "When you're both free"),
-        const SizedBox(height: Space.lg),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
-          child: AvailabilityGrid(
-            overlap: result.score.overlap,
-            cellHeight: lead ? 17 : 15,
-          ),
+        MatchScorePanel(
+          score: result.score.total,
+          large: lead,
+          showMeaning: false,
         ),
-        const SizedBox(height: Space.md),
-        Row(
-          children: <Widget>[
-            TMIcon(
-              when == null ? TMIconName.dash : TMIconName.check,
-              size: 15,
-              color: when == null ? AppColors.inkMuted : AppColors.accepted,
-            ),
-            const SizedBox(width: Space.sm),
-            Flexible(
-              child: Text(
+        const SizedBox(height: Space.lg),
+        Container(
+          padding: const EdgeInsets.all(Space.md),
+          decoration: BoxDecoration(
+            color: AppColors.paper,
+            border: Border.all(color: AppColors.rule),
+            borderRadius: Radii.sharpAll,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  const TMIcon(
+                    TMIconName.calendar,
+                    size: 13,
+                    color: AppColors.inkMuted,
+                  ),
+                  const SizedBox(width: Space.sm),
+                  Text('Shared hours', style: AppType.micro.tone(AppColors.inkMuted)),
+                ],
+              ),
+              const SizedBox(height: Space.sm),
+              AvailabilityGrid(
+                overlap: result.score.overlap,
+                cellHeight: lead ? 13 : 11,
+                partLabels: false,
+              ),
+              const SizedBox(height: Space.sm),
+              Text(
                 when == null
-                    ? 'No overlapping hours in a normal week'
-                    : '${result.score.overlapSlots} blocks a week — $when',
+                    ? 'No overlapping hours in a normal week.'
+                    : '$when · ${result.score.overlapSlots} blocks',
                 style: AppType.bodySmall.tone(
                   when == null ? AppColors.inkMuted : AppColors.inkSecondary,
                 ),
+                maxLines: 2,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
 
-    return TMEntry(
+    final Widget actions = _Actions(
+      lead: lead,
+      requested: requested,
+      onOpen: onOpen,
+      onQuickRequest: onQuickRequest,
+    );
+
+    final Widget body = TMEntry(
       padding: EdgeInsets.zero,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(Radii.sharp - 1),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // The lead entry is marked with a rule across its top edge. One
-            // line, three pixels, no shadow — it is enough to establish rank.
-            if (lead) const SizedBox(height: 3, child: ColoredBox(color: AppColors.accent)),
+            if (lead)
+              const SizedBox(height: 3, child: ColoredBox(color: AppColors.amber)),
             Padding(
-              padding: EdgeInsets.all(lead ? Space.xxl : Space.xl),
-              child: LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints constraints) {
-                  final bool wide = constraints.maxWidth >= 620;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      if (wide)
-                        Row(
+              padding: EdgeInsets.all(lead ? Space.xl : Space.lg + 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  _Header(
+                    rank: rank,
+                    total: total,
+                    tier: result.tier,
+                    lead: lead,
+                    fromProfile: fromProfile,
+                    profileSummary: profileSummary,
+                  ),
+                  SizedBox(height: lead ? Space.lg : Space.md),
+                  LayoutBuilder(
+                    builder: (BuildContext context, BoxConstraints constraints) {
+                      final bool wide = constraints.maxWidth >= 680;
+                      if (!wide) {
+                        return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
-                            Expanded(flex: 3, child: identity),
-                            const SizedBox(width: Space.xxl),
-                            Expanded(flex: 2, child: scoreBlock(true)),
+                            identity,
+                            const SizedBox(height: Space.xl),
+                            scoreBlock,
                           ],
-                        )
-                      else ...<Widget>[
-                        identity,
-                        SizedBox(height: Space.xl),
-                        scoreBlock(false),
-                      ],
-                      SizedBox(height: Space.xxl),
-                      reasons,
-                      SizedBox(height: Space.xxl),
-                      week,
-                      SizedBox(height: Space.xl),
-                      const Divider(height: 1),
-                      const SizedBox(height: Space.lg),
-                      _Actions(
-                        lead: lead,
-                        requested: requested,
-                        tier: result.tier,
-                        onOpen: onOpen,
-                        onQuickRequest: onQuickRequest,
-                      ),
-                    ],
-                  );
-                },
+                        );
+                      }
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Expanded(flex: 7, child: identity),
+                          const SizedBox(width: Space.xxl),
+                          Expanded(flex: 3, child: scoreBlock),
+                        ],
+                      );
+                    },
+                  ),
+                  SizedBox(height: lead ? Space.xl : Space.lg),
+                  const SizedBox(height: 1, child: ColoredBox(color: AppColors.rule)),
+                  const SizedBox(height: Space.md),
+                  actions,
+                ],
               ),
             ),
           ],
         ),
       ),
+    );
+
+    return TiltCard(
+      maxTilt: lead ? 3.5 : 2.2,
+      lift: lead ? 5 : 2,
+      child: body,
     );
   }
 }
@@ -251,136 +244,102 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        // On a phone the three things that belong in this corner do not fit on
-        // one line at a legible size, so the profile tag drops to its own line
-        // rather than the row overflowing. Rank and tier stay together: they are
-        // the two answers to "who is this and how good".
-        final bool stack = constraints.maxWidth < 400;
-
-        // Rank and tier on one line, pushed apart — but if a narrow card or a
-        // long tier word means they cannot share a line, the tier drops below
-        // rather than being clipped. Wrap gives that for free; a Row with a
-        // Spacer would stripe.
-        final Widget rankAndPill = Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: Space.md,
-          runSpacing: Space.sm,
-          children: <Widget>[
-            _RankFigure(rank: rank, total: total, accent: lead),
-            TMStatusPill(tone: tier.tone, label: tier.label, dense: !lead),
-          ],
-        );
-
-        if (!fromProfile) return rankAndPill;
-
-        final Widget tag = _ProfileTag(summary: profileSummary);
-
-        if (stack) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              rankAndPill,
-              const SizedBox(height: Space.md),
-              tag,
-            ],
-          );
-        }
-
-        return Row(
-          children: <Widget>[
-            Expanded(child: _RankFigure(rank: rank, total: total, accent: lead)),
-            Flexible(child: tag),
-            const SizedBox(width: Space.sm),
-            TMStatusPill(tone: tier.tone, label: tier.label, dense: !lead),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Rank as a figure, tabular so 02 and 10 align, with the size of the list
-/// beside it so the number reads as "first of sixteen".
-class _RankFigure extends StatelessWidget {
-  const _RankFigure({required this.rank, required this.total, required this.accent});
-
-  final int rank;
-  final int total;
-  final bool accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
+    final Widget rankFigure = Row(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.baseline,
       textBaseline: TextBaseline.alphabetic,
-      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Text(
           rank.toString().padLeft(2, '0'),
-          style: AppType.figureLarge.tone(accent ? AppColors.accent : AppColors.inkMuted),
+          style: AppType.figureLarge.tone(
+            lead ? AppColors.onAmber : AppColors.inkMuted,
+          ),
         ),
         if (total > 0) ...<Widget>[
           const SizedBox(width: Space.xs + 1),
-          Flexible(
-            child: Text(
-              'of $total',
-              style: AppType.micro.tone(AppColors.inkMuted),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+          Text(
+            'of $total',
+            style: AppType.micro.tone(AppColors.inkMuted),
           ),
         ],
+      ],
+    );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        if (lead)
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: Space.sm,
+              vertical: Space.xs,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.amber,
+              borderRadius: BorderRadius.circular(Radii.pill),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                rankFigure,
+                const SizedBox(width: Space.sm),
+                Text(
+                  'Nearest',
+                  style: AppType.micro.copyWith(fontSize: 9.5)
+                      .tone(AppColors.onAmber),
+                ),
+              ],
+            ),
+          )
+        else
+          rankFigure,
+        const Spacer(),
+        if (fromProfile)
+          Flexible(
+            child: Tooltip(
+              message: profileSummary == null
+                  ? 'Ranked using the answers you just gave.'
+                  : 'Ranked using: $profileSummary',
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints limits) {
+                  // At the narrowest card the provenance mark survives as its
+                  // icon alone: the page header already names the five answers,
+                  // and a squeezed label is worse than no label.
+                  final bool withLabel = limits.maxWidth >= 56;
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const TMIcon(
+                        TMIconName.sparkle,
+                        size: 12,
+                        color: AppColors.accent,
+                      ),
+                      if (withLabel) ...<Widget>[
+                        const SizedBox(width: Space.xs),
+                        Flexible(
+                          child: Text(
+                            'Your answers',
+                            style: AppType.micro.copyWith(fontSize: 9.5)
+                                .tone(AppColors.accent),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        const SizedBox(width: Space.sm),
+        TMStatusPill(tone: tier.tone, label: tier.label, dense: true),
       ],
     );
   }
 }
 
-/// The one honest label for a first-run list: it says the order came from the
-/// answers, and it says which answers, on hover and to a screen reader.
-class _ProfileTag extends StatelessWidget {
-  const _ProfileTag({required this.summary});
-
-  final String? summary;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: summary == null
-          ? 'Ranked using the answers you just gave.'
-          : 'Ranked using: $summary',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: Space.xs),
-        decoration: BoxDecoration(
-          border: Border.all(color: AppColors.accent),
-          borderRadius: BorderRadius.circular(Radii.pill),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const TMIcon(TMIconName.sliders, size: 12, color: AppColors.accent),
-            const SizedBox(width: Space.xs + 1),
-            Flexible(
-              child: Text(
-                'Based on your profile',
-                style: AppType.micro.copyWith(fontSize: 10).tone(AppColors.accent),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Subjects, format, rate, the review line, and the public area. Facts, set as
-/// facts. The area appears only when the person allows it; a distance joins it
-/// only when both sides have a public area. There is no "private" placeholder,
-/// because naming the absence is still a fact about the person.
+/// Subjects, format, rate, review line and public area. Facts, set as facts.
 class _Facts extends StatelessWidget {
   const _Facts({required this.result});
   final MatchResult result;
@@ -398,36 +357,55 @@ class _Facts extends StatelessWidget {
       children: <Widget>[
         Wrap(
           spacing: Space.sm,
-          runSpacing: Space.sm,
+          runSpacing: Space.xs,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
             for (final String subject in candidate.subjects)
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: Space.sm + 1,
+                  horizontal: Space.sm + 2,
                   vertical: 3,
                 ),
                 decoration: BoxDecoration(
+                  color: AppColors.paper,
                   border: Border.all(color: AppColors.ruleStrong),
-                  borderRadius: BorderRadius.circular(Radii.sharp - 1),
+                  borderRadius: BorderRadius.circular(Radii.pill),
                 ),
-                child: Text(subject, style: AppType.bodySmall.tone(AppColors.inkSecondary)),
+                child: Text(
+                  subject,
+                  style: AppType.micro.copyWith(fontSize: 10)
+                      .tone(AppColors.inkSecondary),
+                ),
               ),
             _Dot(),
             Text(candidate.modeCopy, style: AppType.bodySmall.quieter),
             _Dot(),
-            Text(candidate.rateCopy, style: AppType.figure.tone(AppColors.ink)),
+            Text(
+              candidate.rateCopy,
+              style: AppType.figure.tone(AppColors.ink),
+            ),
+            if (candidate.reviews > 0) ...<Widget>[
+              _Dot(),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const TMIcon(
+                    TMIconName.star,
+                    size: 12,
+                    color: AppColors.inkMuted,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    '${candidate.rating} · ${candidate.reviews}',
+                    style: AppType.bodySmall.quieter,
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
-        if (candidate.reviews > 0) ...<Widget>[
-          const SizedBox(height: Space.sm),
-          Text(
-            '${candidate.rating} from ${candidate.reviews} reviews',
-            style: AppType.bodySmall.quieter,
-          ),
-        ],
         if (place != null || distance != null) ...<Widget>[
-          const SizedBox(height: Space.xs),
+          const SizedBox(height: Space.sm),
           Row(
             children: <Widget>[
               const TMIcon(
@@ -468,11 +446,10 @@ class _Dot extends StatelessWidget {
       );
 }
 
-/// One reason: the signal in ink, the explanation quieter underneath, numbered
-/// so "three reasons" is visibly three and not a paragraph.
+/// One reason, led by the mark of the dimension that produced it. The dimension
+/// is visible rather than buried: three rows, three different sources.
 class _Reason extends StatelessWidget {
-  const _Reason({required this.index, required this.note});
-  final int index;
+  const _Reason({required this.note});
   final FitNote note;
 
   @override
@@ -480,31 +457,47 @@ class _Reason extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        SizedBox(
-          width: 22,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              '$index',
-              style: AppType.micro.copyWith(fontSize: 11).tone(AppColors.accent),
-            ),
+        Container(
+          width: 26,
+          height: 26,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppColors.accentWash,
+            borderRadius: BorderRadius.circular(Radii.sharp - 3),
+          ),
+          child: TMIcon(
+            switch (note.dimension) {
+              MatchDimension.subjects => TMIconName.book,
+              MatchDimension.time => TMIconName.clock,
+              MatchDimension.style => TMIconName.sparkle,
+              MatchDimension.format => TMIconName.compass,
+              MatchDimension.budget => TMIconName.wallet,
+            },
+            size: 14,
+            color: AppColors.accent,
           ),
         ),
+        const SizedBox(width: Space.md),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
                 note.signal,
-                style: AppType.body.copyWith(fontWeight: FontWeight.w600),
+                style: AppType.bodySmall.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: Space.xs),
-              SizedBox(
-                width: 560,
-                child: Text(note.detail, style: AppType.bodySmall.quieter),
+              const SizedBox(height: 1),
+              Text(
+                note.detail,
+                style: AppType.bodySmall.copyWith(fontSize: 12).quieter,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: Space.xs),
-              Text(note.dimensionLabel.toUpperCase(), style: AppType.micro.tone(AppColors.inkMuted)),
             ],
           ),
         ),
@@ -517,52 +510,111 @@ class _Actions extends StatelessWidget {
   const _Actions({
     required this.lead,
     required this.requested,
-    required this.tier,
     required this.onOpen,
     required this.onQuickRequest,
   });
 
   final bool lead;
   final bool requested;
-  final MatchTier tier;
   final VoidCallback? onOpen;
   final VoidCallback? onQuickRequest;
 
   @override
   Widget build(BuildContext context) {
     if (requested) {
-      return Row(
-        children: <Widget>[
-          const TMStatusPill(tone: StatusTone.pending, label: 'Requested'),
-          const SizedBox(width: Space.md),
-          Flexible(
-            child: Text(
-              'You have already asked. You will hear back here.',
-              style: AppType.bodySmall.quieter,
-            ),
-          ),
-        ],
+      // A request is a step, not a dead end: the reasons and the person page
+      // remain one click away after asking.
+      return LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final Widget open = TMButton(
+            label: 'Open profile',
+            variant: TMButtonVariant.secondary,
+            icon: TMIconName.arrowRight,
+            minHeight: Hit.min,
+            onPressed: onOpen,
+          );
+          final Widget status = TMStatusPill(
+            tone: StatusTone.pending,
+            label: 'Requested',
+          );
+
+          // On a narrow card the button sits under the status rather than
+          // squeezing the explanation into a three-word column.
+          if (constraints.maxWidth < 520) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Wrap(
+                  spacing: Space.md,
+                  runSpacing: Space.sm,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[status, open],
+                ),
+                const SizedBox(height: Space.sm),
+                Text(
+                  'You have already asked. The answer will arrive in Messages.',
+                  style: AppType.bodySmall.quieter,
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            children: <Widget>[
+              status,
+              const SizedBox(width: Space.md),
+              Flexible(
+                child: Text(
+                  'You have already asked. The answer will arrive in Messages.',
+                  style: AppType.bodySmall.quieter,
+                ),
+              ),
+              const SizedBox(width: Space.md),
+              open,
+            ],
+          );
+        },
       );
     }
 
-    return Wrap(
-      spacing: Space.md,
-      runSpacing: Space.sm,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        TMButton(
-          label: lead ? 'Open the full profile' : 'Open profile',
-          variant: lead ? TMButtonVariant.primary : TMButtonVariant.secondary,
-          icon: TMIconName.arrowRight,
-          minHeight: Hit.min,
-          onPressed: onOpen,
-        ),
-        if (lead)
-          TMTextLink(
-            label: 'or send a request straight away',
-            onTap: onQuickRequest,
-          ),
-      ],
+    final Widget open = TMButton(
+      label: lead ? 'Open the full profile' : 'Open profile',
+      variant: lead ? TMButtonVariant.primary : TMButtonVariant.secondary,
+      icon: TMIconName.arrowRight,
+      minHeight: Hit.min,
+      onPressed: onOpen,
+    );
+
+    if (!lead) {
+      return Align(alignment: Alignment.centerLeft, child: open);
+    }
+
+    // The lead card carries a second, lighter action. It moves to its own row
+    // on a narrow card rather than shrinking both targets or clipping one.
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final Widget quick = TMTextLink(
+          label: 'Ask straight away',
+          onTap: onQuickRequest,
+        );
+        if (constraints.maxWidth < 420) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              open,
+              const SizedBox(height: Space.md),
+              quick,
+            ],
+          );
+        }
+        return Row(
+          children: <Widget>[
+            open,
+            const Spacer(),
+            quick,
+          ],
+        );
+      },
     );
   }
 }
@@ -571,9 +623,8 @@ class _Actions extends StatelessWidget {
 // Loading
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A skeleton that keeps the card's exact proportions, so nothing jumps when the
-/// real content lands. Static blocks with one sweeping rule above them: no
-/// shimmer, no spinner over the content.
+/// A skeleton with the card's proportions, so nothing jumps when content lands.
+/// Static blocks, no shimmer.
 class MatchCardSkeleton extends StatelessWidget {
   const MatchCardSkeleton({this.rank = 1, super.key});
 
@@ -592,30 +643,60 @@ class MatchCardSkeleton extends StatelessWidget {
               children: <Widget>[
                 Text(
                   rank.toString().padLeft(2, '0'),
-                  style: AppType.figureLarge.tone(AppColors.rule),
+                  style: AppType.figureLarge.tone(AppColors.ruleStrong),
                 ),
                 const Spacer(),
-                const _Block(width: 96, height: 20, radius: Radii.pill),
+                const _Block(width: 88, height: 20, radius: Radii.pill),
+              ],
+            ),
+            const SizedBox(height: Space.xl),
+            Row(
+              children: <Widget>[
+                const _Block(width: 46, height: 46, radius: 14),
+                const SizedBox(width: Space.lg),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const <Widget>[
+                      _Block(width: 190, height: 18),
+                      SizedBox(height: Space.sm),
+                      _Block(width: 260, height: 11),
+                    ],
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: Space.lg),
-            const _Block(width: 190, height: 20),
-            const SizedBox(height: Space.md),
-            const _Block(width: 280, height: 12),
-            const SizedBox(height: Space.xl),
-            const _Block(width: 260, height: 14, radius: 2),
-            const SizedBox(height: Space.md),
-            const _Block(width: 74, height: 22),
-            const SizedBox(height: Space.sm),
-            const _Block(width: double.infinity, height: 22, radius: 2),
-            const SizedBox(height: Space.xl),
-            for (int i = 0; i < 2; i++) ...<Widget>[
-              const _Block(width: 240, height: 12),
+            const _Block(width: 300, height: 11),
+            const SizedBox(height: Space.lg),
+            for (int i = 0; i < 3; i++) ...<Widget>[
+              Row(
+                children: <Widget>[
+                  const _Block(width: 26, height: 26, radius: 9),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const <Widget>[
+                        _Block(width: 220, height: 10),
+                        SizedBox(height: Space.xs),
+                        _Block(width: 300, height: 9),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: Space.sm),
-              const _Block(width: double.infinity, height: 10),
-              const SizedBox(height: Space.lg),
             ],
-            const _Block(width: 320, height: 58, radius: 2),
+            const SizedBox(height: Space.md),
+            Wrap(
+              spacing: Space.md,
+              runSpacing: Space.sm,
+              children: const <Widget>[
+                _Block(width: 160, height: 44, radius: 12),
+                _Block(width: 120, height: 20, radius: 10),
+              ],
+            ),
           ],
         ),
       ),
@@ -638,13 +719,16 @@ class _Block extends StatelessWidget {
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.centerLeft,
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: AppColors.paperSunken,
-            borderRadius: BorderRadius.circular(radius),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: width),
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppColors.paperSunken,
+              borderRadius: BorderRadius.circular(radius),
+            ),
           ),
         ),
       ),

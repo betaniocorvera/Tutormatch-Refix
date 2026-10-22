@@ -82,6 +82,8 @@ class _LoginScreenState extends State<LoginScreen> {
       lede: 'Pick up your list where you left it. In this prototype there is '
           'nothing to pick up yet — any valid-looking email and a password of '
           'eight characters will let you through.',
+      formEyebrow: 'YOUR ACCOUNT',
+      formTitle: 'Sign in, and pick up the list.',
       nextSteps: const <String>[
         'Your ranked list and your filters, as you left them.',
         'Any requests you have sent, with their answers.',
@@ -98,7 +100,13 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            AuthRoleSwitch(role: _role, onChanged: (Role r) => setState(() => _role = r)),
+            AuthRoleSwitch(
+              role: _role,
+              label: 'I am signing in as',
+              reason: 'This decides whose list you see next. It does not change '
+                  'what we ask you, only who gets ranked.',
+              onChanged: (Role r) => setState(() => _role = r),
+            ),
             const SizedBox(height: Space.xl),
             TMButton(
               label: 'Continue with Google',

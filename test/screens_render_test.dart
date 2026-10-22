@@ -1,10 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Every screen, rendered at three widths.
+// Every screen, rendered at four widths.
 //
 // This is not a behaviour test. It is the check that no screen overflows the
 // frame at the sizes the product claims to support: a small Android phone
-// (360), a mid-size phone (390) where the week grid is at its tightest, and a
-// laptop (1440) where the two-column shells engage.
+// (360), a mid-size phone (390) where the week grid is at its tightest, a large
+// phone (430), and a laptop (1440) where the two-column shells engage.
 //
 // An overflow is a hard failure here, because a RenderFlex overflow stripe is
 // the one visual defect that a screenshot review reliably misses on the machine
@@ -38,6 +38,9 @@ import 'package:tutormatch/screens/requests_screen.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/location_map.dart';
+import 'package:tutormatch/widgets/match_card.dart';
+import 'package:tutormatch/widgets/tm_button.dart';
+import 'package:tutormatch/widgets/tm_field.dart';
 
 /// A valid, opaque 1×1 red PNG: what the picker would hand to app state.
 final Uint8List _redDot = base64Decode(
@@ -48,6 +51,7 @@ final Uint8List _redDot = base64Decode(
 const List<Size> _sizes = <Size>[
   Size(360, 780), // the narrow phone the week grid has to survive
   Size(390, 844), // the common phone
+  Size(430, 932), // a large phone
   Size(1440, 900), // a laptop, where the two-column shells engage
 ];
 
@@ -244,11 +248,13 @@ void main() {
           // Wide has the emoji in the bar; a phone has to go through +.
           if (find.byTooltip('More ways to send').evaluate().isNotEmpty) {
             await t.tap(find.byTooltip('More ways to send'));
+            await t.pump();
             await t.pump(const Duration(milliseconds: 300));
             await t.tap(find.text('Emoji'));
           } else {
             await t.tap(find.byTooltip('Insert an emoji'));
           }
+          await t.pump();
           await t.pump(const Duration(milliseconds: 300));
           expect(find.text('EMOJI'), findsOneWidget);
         },
@@ -265,11 +271,13 @@ void main() {
         act: (WidgetTester t) async {
           if (find.byTooltip('More ways to send').evaluate().isNotEmpty) {
             await t.tap(find.byTooltip('More ways to send'));
+            await t.pump();
             await t.pump(const Duration(milliseconds: 300));
             await t.tap(find.text('Voice note'));
           } else {
             await t.tap(find.byTooltip('Record a voice note'));
           }
+          await t.pump();
           await t.pump(const Duration(milliseconds: 2300));
           expect(find.byType(TextField), findsNothing);
           expect(find.text('Cancel'), findsOneWidget);
@@ -387,6 +395,85 @@ void main() {
       );
     });
   }
+
+  for (final Size size in <Size>[
+    const Size(360, 780),
+    const Size(390, 844),
+    const Size(430, 932),
+  ]) {
+    testWidgets(
+      'the phone shell keeps labels and content clear of the bottom bar '
+      '@${size.width.toInt()}px',
+      (WidgetTester tester) async {
+        final AppState answered = AppState()..profileAnswered = true;
+        await render(
+          tester,
+          const MatchesScreen(),
+          size,
+          state: answered,
+          label: 'Mobile shell',
+        );
+        await tester.pump(const Duration(milliseconds: 900));
+
+        final Finder nav = find.byKey(const Key('tm-bottom-nav'));
+        expect(nav, findsOneWidget);
+        final Rect navRect = tester.getRect(nav);
+        expect(navRect.height, 64);
+        expect(navRect.bottom, size.height);
+
+        // No label touches the window edge, and the four slots stay equal.
+        final Rect firstLabel = tester.getRect(find.text('Matches').last);
+        final Rect profileLabel = tester.getRect(find.text('Profile').last);
+        expect(firstLabel.left, greaterThanOrEqualTo(8));
+        expect(profileLabel.right, lessThanOrEqualTo(size.width - 8));
+        final double firstCentre = firstLabel.center.dx;
+        final double lastCentre = profileLabel.center.dx;
+        expect(lastCentre - firstCentre, closeTo((size.width - 16) * 3 / 4, 1));
+
+        // The whole 64 px slot is the tap target, not just the icon.
+        final Finder navTarget = find
+            .ancestor(
+              of: find.text('Matches').last,
+              matching: find.byType(TMFocusable),
+            )
+            .first;
+        final Size navTap = tester.getSize(navTarget);
+        expect(navTap.height, greaterThanOrEqualTo(44));
+        expect(navTap.width, greaterThanOrEqualTo(44));
+
+        // The view switch is a compact, rule-free filled control.
+        final Finder toggle = find.byType(TMSegmented<bool>);
+        expect(tester.getSize(toggle), const Size(180, 40));
+        expect(
+          find.descendant(of: toggle, matching: find.byType(VerticalDivider)),
+          findsNothing,
+        );
+
+        // "Change them" is an accent action with a full touch target.
+        final Rect changeText = tester.getRect(find.text('Change them'));
+        expect(changeText.height, greaterThan(0));
+        final Finder changeTarget = find
+            .ancestor(
+              of: find.text('Change them'),
+              matching: find.byType(TMFocusable),
+            )
+            .first;
+        expect(tester.getSize(changeTarget).height, greaterThanOrEqualTo(44));
+        expect(
+          tester.widget<Text>(find.text('Change them')).style?.color,
+          AppColors.accent,
+        );
+
+        // Even the final card can scroll completely above the bar.
+        final ScrollableState scrollable =
+            tester.state<ScrollableState>(find.byType(Scrollable).first);
+        scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+        final Rect lastCard = tester.getRect(find.byType(MatchResultCard).last);
+        expect(lastCard.bottom, lessThanOrEqualTo(navRect.top));
+      },
+    );
+  }
 }
 /// Registers the two bundled families under the names the theme asks for, at
 /// every weight the type scale uses.
@@ -399,11 +486,16 @@ Future<void> _loadBundledFonts() async {
     await loader.load();
   }
 
-  await family('Spectral', <String>[
-    'assets/fonts/Spectral-Regular.ttf',
-    'assets/fonts/Spectral-Italic.ttf',
-    'assets/fonts/Spectral-SemiBold.ttf',
-    'assets/fonts/Spectral-Bold.ttf',
+  await family('Bricolage Grotesque', <String>[
+    'assets/fonts/BricolageGrotesque-Variable.ttf',
   ]);
-  await family('Public Sans', <String>['assets/fonts/PublicSans-Variable.ttf']);
+  await family('Figtree', <String>['assets/fonts/Figtree-Variable.ttf']);
+  await family('IBM Plex Mono', <String>[
+    'assets/fonts/IBMPlexMono-Regular.ttf',
+    'assets/fonts/IBMPlexMono-Medium.ttf',
+  ]);
+  await family('PhosphorRegular', <String>[
+    'assets/fonts/PhosphorRegular.ttf',
+  ]);
+  await family('PhosphorBold', <String>['assets/fonts/PhosphorBold.ttf']);
 }

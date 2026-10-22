@@ -3,16 +3,16 @@
 //
 // There are no photographs of anybody else in this product and there will not
 // be: everybody in the pool is sample data, and a stock face would be a lie
-// with better lighting. So most people here are their initials on a ruled
-// square, drawn from the same paper and the same hairline as every row around
-// them. Two or three of them wear a flat dye instead — the stand-in for "has a
-// picture" that costs no stranger anything.
+// with better lighting. So most people here are their initials on a flat dye,
+// rounded like a card rather than circled like a social profile.
 //
-// The one real photograph in the product is the picture the person using it
-// picked from their own device. It arrives as bytes from app state, is never
-// uploaded, and falls back to the initials the moment it is removed — so this
-// one widget draws every avatar in the app, and nothing else has to know which
-// kind it is.
+// The dye is deterministic from the name, so the same person is the same colour
+// on the map, in the list and on their own page without storing anything. Four
+// of the sample people carry an explicit tint; the rest are assigned one.
+//
+// The one real photograph is the picture the person using the app picked from
+// their own device. It arrives as bytes from app state, is never uploaded, and
+// falls back to the initials the moment it is removed.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:typed_data';
@@ -21,7 +21,14 @@ import 'package:flutter/material.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 
 class TMAvatar extends StatelessWidget {
-  const TMAvatar(this.name, {this.size = 40, this.photo, this.tint, super.key});
+  const TMAvatar(
+    this.name, {
+    this.size = 40,
+    this.photo,
+    this.tint,
+    this.heroTag,
+    super.key,
+  });
 
   final String name;
   final double size;
@@ -31,8 +38,12 @@ class TMAvatar extends StatelessWidget {
   final Uint8List? photo;
 
   /// The flat dye that stands in for a picture on a few of the sample people.
-  /// Null — which is almost everybody — means initials on sunken paper.
+  /// Null means the deterministic dye below.
   final Color? tint;
+
+  /// Set to the same tag on a list row and a detail header to carry the avatar
+  /// between routes. Callers are responsible for uniqueness within one route.
+  final Object? heroTag;
 
   /// Two letters, taken from the start of the first two words. Public because
   /// the chat uses it for a run of messages without repeating the full name.
@@ -50,25 +61,48 @@ class TMAvatar extends StatelessWidget {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
-  /// The fallback: initials on paper, or on the dye when there is one. Drawn at
-  /// the same weight as the rules around it — this identifies a person, it does
-  /// not decorate one.
+  static const List<Color> _dyes = <Color>[
+    AppColors.accent,
+    AppColors.avatarSlate,
+    AppColors.avatarClay,
+    AppColors.avatarMoss,
+    AppColors.avatarPlum,
+    AppColors.avatarSteel,
+  ];
+
+  /// A stable dye for a name. Not a status, not a rank: identity only.
+  static Color dyeFor(String name) {
+    int hash = 7;
+    for (final int unit in name.codeUnits) {
+      hash = (hash * 31 + unit) & 0x7fffffff;
+    }
+    return _dyes[hash % _dyes.length];
+  }
+
+  double get _radius => (size * 0.3).clamp(6.0, 22.0);
+
   Widget _fallback() {
+    final Color dye = tint ?? dyeFor(name);
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: tint ?? AppColors.paperSunken,
-        border: Border.all(color: tint ?? AppColors.ruleStrong),
-        borderRadius: Radii.sharpAll,
+        color: dye,
+        borderRadius: BorderRadius.circular(_radius),
+        border: Border.all(
+          color: AppColors.onAccent.withValues(alpha: 0.14),
+        ),
       ),
       child: Text(
         initialsOf(name),
         maxLines: 1,
-        style: AppType.micro
-            .copyWith(fontSize: size * 0.3)
-            .tone(tint == null ? AppColors.inkSecondary : AppColors.onAccent),
+        style: AppType.label.copyWith(
+          fontSize: (size * 0.31).clamp(9.0, 22.0),
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+          color: AppColors.onAccent,
+        ),
       ),
     );
   }
@@ -77,23 +111,33 @@ class TMAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     // Decorative: every avatar in the product sits beside the person's name or
     // inside a control that announces itself.
-    if (photo == null) return ExcludeSemantics(child: _fallback());
-
-    return ExcludeSemantics(
-      child: ClipRRect(
-        borderRadius: Radii.sharpAll,
-        child: Image.memory(
-          photo!,
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-          // Bytes that turn out not to be an image are not worth a broken
-          // screen: the initials are right there behind them.
-          errorBuilder: (BuildContext context, Object error, StackTrace? stack) =>
-              _fallback(),
+    Widget content;
+    if (photo == null) {
+      content = ExcludeSemantics(child: _fallback());
+    } else {
+      content = ExcludeSemantics(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(_radius),
+          child: Image.memory(
+            photo!,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            // Bytes that turn out not to be an image are not worth a broken
+            // screen: the initials are right there behind them.
+            errorBuilder: (
+              BuildContext context,
+              Object error,
+              StackTrace? stack,
+            ) =>
+                _fallback(),
+          ),
         ),
-      ),
-    );
+      );
+    }
+
+    if (heroTag == null) return content;
+    return Hero(tag: heroTag!, child: content);
   }
 }

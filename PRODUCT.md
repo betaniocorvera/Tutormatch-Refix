@@ -41,5 +41,6 @@ answers live in memory and are gone on reload.
 
 ## Brand commitments
 
-Set below in DESIGN.md. One line: warm paper, one ink-red accent, a serif that
-speaks and a sans that works.
+Cool paper, deep ink, one green-teal signal and one amber marker. Bricolage
+Grotesque speaks, Figtree works, IBM Plex Mono reads the measurements. The visual
+idea is closeness: a neighbour map, hairline structure and no decorative depth.

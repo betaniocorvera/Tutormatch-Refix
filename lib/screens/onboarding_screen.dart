@@ -121,12 +121,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       onJump: (int i) => setState(() => _step = i),
       onDemo: _useDemo,
       role: widget.role,
+      compact: !wide,
     );
 
     final Widget question = _Question(
       step: _step,
       title: _stepTitles[_step],
       dimension: _stepDimensions[_step],
+      showIndex: wide,
       blocker: _blocker,
       busy: _busy,
       last: _step == 4,
@@ -134,6 +136,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       onBack: _step == 0 ? null : () => setState(() => _step--),
       onNext: _canContinue ? _next : null,
       child: _control(),
+    );
+
+    // One shared-axis move per step: the question leaves towards the left and
+    // the next arrives from the right, both fading rather than sliding a full
+    // page. The controls themselves keep their state across the swap.
+    final Widget questionSwap = AnimatedSwitcher(
+      duration: Motion.respect(context, Motion.page),
+      switchInCurve: Motion.ease,
+      switchOutCurve: Motion.ease,
+      layoutBuilder: (Widget? currentChild, List<Widget> previousChildren) {
+        return Stack(
+          alignment: Alignment.topLeft,
+          children: <Widget>[
+            ...previousChildren,
+            ?currentChild,
+          ],
+        );
+      },
+      transitionBuilder: (Widget child, Animation<double> animation) {
+        if (Motion.reduced(context)) return child;
+        final Animation<Offset> slide = Tween<Offset>(
+          begin: const Offset(0.025, 0),
+          end: Offset.zero,
+        ).animate(CurvedAnimation(parent: animation, curve: Motion.ease));
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(position: slide, child: child),
+        );
+      },
+      child: KeyedSubtree(key: ValueKey<int>(_step), child: question),
     );
 
     return TMPage(
@@ -149,7 +181,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               children: <Widget>[
                 SizedBox(width: TMLayout.railWidth, child: rail),
                 const SizedBox(width: Space.huge),
-                Expanded(child: question),
+                Expanded(child: questionSwap),
               ],
             )
           else ...<Widget>[
@@ -159,7 +191,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               dimensions: _stepDimensions,
             ),
             SizedBox(height: Space.xl),
-            question,
+            questionSwap,
             SizedBox(height: Space.xxl),
             rail,
           ],
@@ -274,6 +306,7 @@ class _Rail extends StatelessWidget {
     required this.onJump,
     required this.onDemo,
     required this.role,
+    required this.compact,
   });
 
   final List<String> titles;
@@ -282,24 +315,27 @@ class _Rail extends StatelessWidget {
   final ValueChanged<int> onJump;
   final VoidCallback onDemo;
   final Role role;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const TMMicroLabelText('Registration form'),
-        const SizedBox(height: Space.lg),
-        for (int i = 0; i < titles.length; i++)
-          _RailItem(
-            index: i,
-            title: titles[i],
-            dimension: dimensions[i],
-            current: i == current,
-            reached: i <= current,
-            onTap: i <= current ? () => onJump(i) : null,
-          ),
-        const SizedBox(height: Space.xl),
+        if (!compact) ...<Widget>[
+          const TMMicroLabelText('Registration form'),
+          const SizedBox(height: Space.lg),
+          for (int i = 0; i < titles.length; i++)
+            _RailItem(
+              index: i,
+              title: titles[i],
+              dimension: dimensions[i],
+              current: i == current,
+              reached: i <= current,
+              onTap: i <= current ? () => onJump(i) : null,
+            ),
+          const SizedBox(height: Space.xl),
+        ],
         const SizedBox(height: 1, child: ColoredBox(color: AppColors.rule)),
         const SizedBox(height: Space.lg),
         SizedBox(
@@ -311,12 +347,19 @@ class _Rail extends StatelessWidget {
           ),
         ),
         const SizedBox(height: Space.lg),
-        TMTextLink(
-          label: 'Or skip this and use the demo profile',
-          onTap: onDemo,
-          style: AppType.bodySmall,
+        Text(
+          'Not ready to answer? Start from a sample profile and change it later.',
+          style: AppType.bodySmall.quieter,
         ),
-        const SizedBox(height: Space.xs),
+        const SizedBox(height: Space.sm),
+        TMButton(
+          label: 'Use the demo profile',
+          variant: TMButtonVariant.secondary,
+          icon: TMIconName.arrowRight,
+          minHeight: Hit.min,
+          onPressed: onDemo,
+        ),
+        const SizedBox(height: Space.md),
         SizedBox(
           width: TMLayout.railWidth - 20,
           child: Text(
@@ -419,6 +462,7 @@ class _Question extends StatelessWidget {
     required this.step,
     required this.title,
     required this.dimension,
+    required this.showIndex,
     required this.blocker,
     required this.busy,
     required this.last,
@@ -431,6 +475,7 @@ class _Question extends StatelessWidget {
   final int step;
   final String title;
   final String dimension;
+  final bool showIndex;
   final String? blocker;
   final bool busy;
   final bool last;
@@ -445,12 +490,15 @@ class _Question extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         // The step number is real information here: it is a form with five
-        // parts and you are on one of them.
-        Text(
-          'Question ${step + 1} of 5'.toUpperCase(),
-          style: AppType.micro.tone(AppColors.accent),
-        ),
-        const SizedBox(height: Space.md),
+        // parts and you are on one of them. On a phone the progress strip above
+        // already carries it, so the number is not repeated.
+        if (showIndex) ...<Widget>[
+          Text(
+            'Question ${step + 1} of 5'.toUpperCase(),
+            style: AppType.micro.tone(AppColors.accent),
+          ),
+          const SizedBox(height: Space.md),
+        ],
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 620),
           child: Text(_headline(step, role), style: AppType.pageTitle),
@@ -488,7 +536,10 @@ class _Question extends StatelessWidget {
             if (blocker != null)
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 380),
-                child: Text(blocker!, style: AppType.bodySmall.tone(AppColors.alert)),
+                child: Text(
+                  blocker!,
+                  style: AppType.bodySmall.quieter,
+                ),
               ),
           ],
         ),

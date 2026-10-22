@@ -160,13 +160,13 @@ class _Cell extends StatelessWidget {
     }
 
     return AnimatedContainer(
-      duration: Motion.slow,
+      duration: Motion.respect(context, Motion.slow),
       curve: Motion.ease,
       height: height,
       decoration: BoxDecoration(
         color: fill,
         border: Border.all(color: border),
-        borderRadius: const BorderRadius.all(Radius.circular(2)),
+        borderRadius: const BorderRadius.all(Radius.circular(5)),
       ),
       child: theirsOnly
           ? const Center(
@@ -221,7 +221,7 @@ class AvailabilityLegend extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: fill,
                     border: Border.all(color: border),
-                    borderRadius: const BorderRadius.all(Radius.circular(2)),
+                    borderRadius: const BorderRadius.all(Radius.circular(4)),
                   ),
                 ),
               ),
@@ -376,9 +376,9 @@ class _EditorCell extends StatelessWidget {
       builder: (BuildContext context, TMState s) {
         return TMFocusRing(
           focused: s.focused,
-          radius: 2,
+          radius: 5,
           child: AnimatedContainer(
-            duration: Motion.fast,
+            duration: Motion.respect(context, Motion.fast),
             curve: Motion.ease,
             constraints: const BoxConstraints(minHeight: Hit.min),
             decoration: BoxDecoration(
@@ -398,7 +398,7 @@ class _EditorCell extends StatelessWidget {
                             ? AppColors.ruleStrong
                             : AppColors.rule,
               ),
-              borderRadius: const BorderRadius.all(Radius.circular(2)),
+              borderRadius: const BorderRadius.all(Radius.circular(5)),
             ),
             child: Center(
               child: Text(

@@ -67,9 +67,9 @@ class TMStatusPill extends StatelessWidget {
   }
 }
 
-/// The indeterminate loading rule. Two pixels of accent sweeping a hairline
-/// track: the only animation in the product that is not a state change, and it
-/// exists because "we are working" has no other honest shape.
+/// The loading rule. Two pixels of accent crossing a hairline track exactly
+/// once: the work is finite, and a rule that loops would claim it is not. When
+/// the platform asks for stillness, the rule is a fixed 32% mark instead.
 class TMProgressRule extends StatefulWidget {
   const TMProgressRule({this.width = 220, super.key});
 
@@ -83,8 +83,19 @@ class _TMProgressRuleState extends State<TMProgressRule>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1150),
-  )..repeat();
+    duration: const Duration(milliseconds: 900),
+  );
+  bool _still = false;
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _still = Motion.reduced(context);
+    if (!_still) _c.forward();
+  }
 
   @override
   void dispose() {
@@ -94,19 +105,36 @@ class _TMProgressRuleState extends State<TMProgressRule>
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: widget.width,
-      height: 2,
-      child: DecoratedBox(
-        decoration: const BoxDecoration(color: AppColors.rule),
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (BuildContext context, Widget? child) => FractionallySizedBox(
-            alignment: Alignment(-1 + 3 * _c.value, 0),
-            widthFactor: 0.32,
-            heightFactor: 1,
-            child: const ColoredBox(color: AppColors.accent),
-          ),
+    return Semantics(
+      label: 'Ranking in progress',
+      child: SizedBox(
+        width: widget.width,
+        height: 2,
+        child: DecoratedBox(
+          decoration: const BoxDecoration(color: AppColors.rule),
+          child: _still
+              ? const Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: 0.32,
+                    heightFactor: 1,
+                    child: ColoredBox(color: AppColors.accent),
+                  ),
+                )
+              : AnimatedBuilder(
+                  animation: _c,
+                  builder: (BuildContext context, Widget? child) {
+                    final double t = Motion.emphasized.transform(_c.value);
+                    return Align(
+                      alignment: Alignment(-1 + 2 * t, 0),
+                      child: FractionallySizedBox(
+                        widthFactor: 0.32,
+                        heightFactor: 1,
+                        child: const ColoredBox(color: AppColors.accent),
+                      ),
+                    );
+                  },
+                ),
         ),
       ),
     );

@@ -1,26 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// The match score, drawn as a measurement.
+// The match score, drawn as an instrument reading.
 //
-// A ring, a gauge or a soft-shadowed percentage all say "trust me". A ruler says
-// "count it". The score is a 0-100 agreement across five weighted dimensions, so
-// it is drawn as a 100-unit rule: major ticks every ten points, the agreed part
-// filled in the accent, and a cursor standing on the exact value. The numeral
-// sits beside it in tabular figures because the numeral is data, and data in
-// this product is set in Public Sans.
+// A number is the claim; the ring is the measurement. The ring fills from zero
+// to the value while the figure counts up with it, once, when the card arrives.
+// From then on it is still: no looping, no glow, no gauge that celebrates.
 //
-// Everything here is one [CustomPainter] and one [Semantics] node: a screen
-// reader hears "Match score 87 out of 100, strong match", not twenty-one ticks.
+// The five dimensions keep the ruler they had — a short, comparable scale for
+// each contribution — because a ring can say how much and a row can say where.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 
-/// The ruler on its own. Use [MatchScoreBlock] when you also want the number.
+/// The compact linear reading. Kept for any caller that needs a score in one
+/// line; [MatchScorePanel] uses the ring instead.
 class MatchScoreScale extends StatelessWidget {
   const MatchScoreScale({
     required this.score,
-    this.height = 22,
+    this.height = 8,
     this.tickColor = AppColors.ruleStrong,
     this.trackColor = AppColors.rule,
     this.showTicks = true,
@@ -35,90 +35,74 @@ class MatchScoreScale extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double value = score.clamp(0, 100) / 100;
     return Semantics(
       label: 'Match score $score out of 100',
       excludeSemantics: true,
-      child: SizedBox(
-        height: height,
-        width: double.infinity,
-        child: CustomPaint(
-          painter: _RulerPainter(
-            score: score,
-            tickColor: tickColor,
-            trackColor: trackColor,
-            showTicks: showTicks,
-          ),
-        ),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: value),
+        duration: Motion.respect(context, const Duration(milliseconds: 620)),
+        curve: Motion.emphasized,
+        builder: (BuildContext context, double t, Widget? child) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              SizedBox(
+                height: height,
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints c) => Stack(
+                    alignment: Alignment.centerLeft,
+                    children: <Widget>[
+                      Container(
+                        height: height,
+                        decoration: BoxDecoration(
+                          color: trackColor,
+                          borderRadius: BorderRadius.circular(height / 2),
+                        ),
+                      ),
+                      Container(
+                        height: height,
+                        width: c.maxWidth * t,
+                        decoration: BoxDecoration(
+                          color: AppColors.accent,
+                          borderRadius: BorderRadius.circular(height / 2),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (showTicks) ...<Widget>[
+                const SizedBox(height: Space.xs),
+                Row(
+                  children: <Widget>[
+                    for (int i = 0; i <= 10; i++)
+                      Expanded(
+                        child: Align(
+                          alignment: i == 0
+                              ? Alignment.centerLeft
+                              : i == 10
+                                  ? Alignment.centerRight
+                                  : Alignment.center,
+                          child: Container(
+                            width: 1,
+                            height: i % 5 == 0 ? 5 : 3,
+                            color: tickColor,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class _RulerPainter extends CustomPainter {
-  _RulerPainter({
-    required this.score,
-    required this.tickColor,
-    required this.trackColor,
-    required this.showTicks,
-  });
-
-  final int score;
-  final Color tickColor;
-  final Color trackColor;
-  final bool showTicks;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double w = size.width;
-    final double value = score.clamp(0, 100) / 100;
-    final double trackTop = size.height * 0.42;
-    const double trackHeight = 7;
-
-    // The full range, at rest.
-    canvas.drawRect(
-      Rect.fromLTWH(0, trackTop, w, trackHeight),
-      Paint()..color = trackColor,
-    );
-
-    // The agreed part.
-    canvas.drawRect(
-      Rect.fromLTWH(0, trackTop, w * value, trackHeight),
-      Paint()..color = AppColors.accent,
-    );
-
-    // Major ticks every ten points, sitting above the rule like the graduations
-    // on a printed scale. Drawn in the track colour so they read as the rule's
-    // own detail and never as content.
-    if (showTicks) {
-      final Paint tick = Paint()..color = tickColor;
-      for (int i = 0; i <= 10; i++) {
-        final double x = (w - 1) * (i / 10);
-        final bool major = i % 5 == 0;
-        canvas.drawRect(
-          Rect.fromLTWH(x, trackTop - (major ? 6 : 3.5), 1, major ? 6 : 3.5),
-          tick,
-        );
-      }
-    }
-
-    // The cursor, standing on the exact value. Ink, not accent, so it stays
-    // legible even when the value is zero.
-    final double cx = (w - 2) * value;
-    canvas.drawRect(
-      Rect.fromLTWH(cx, 1, 2, size.height - 1),
-      Paint()..color = AppColors.ink,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_RulerPainter old) =>
-      old.score != score ||
-      old.tickColor != tickColor ||
-      old.trackColor != trackColor ||
-      old.showTicks != showTicks;
-}
-
-/// The number, the word for it, and the ruler under both.
+/// The number, the word for it, and the ring that measures it.
 class MatchScorePanel extends StatelessWidget {
   const MatchScorePanel({
     required this.score,
@@ -136,63 +120,161 @@ class MatchScorePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final MatchTier tier = tierFor(score);
+    final double ring = large ? 98 : 62;
+
     return Semantics(
       container: true,
       label: 'Match score $score out of 100. ${tier.label}.',
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: <Widget>[
-                    Text(
-                      '$score',
-                      style: large ? AppType.score : AppType.scoreSmall,
+          RepaintBoundary(
+            child: SizedBox.square(
+              dimension: ring,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0, end: score.toDouble()),
+                duration:
+                    Motion.respect(context, const Duration(milliseconds: 720)),
+                curve: Motion.emphasized,
+                builder: (BuildContext context, double value, Widget? child) {
+                  return CustomPaint(
+                    painter: _ScoreRingPainter(
+                      value: value.clamp(0, 100),
+                      large: large,
                     ),
-                    const SizedBox(width: Space.xs),
-                    Flexible(
-                      child: Text(
-                        '/ 100',
-                        style: AppType.bodySmall.quieter,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            value.round().toString(),
+                            style: (large ? AppType.score : AppType.scoreSmall)
+                                .copyWith(fontSize: large ? 31 : 20),
+                          ),
+                          if (large)
+                            Text(
+                              '/ 100',
+                              style: AppType.micro.copyWith(fontSize: 8.5)
+                                  .tone(AppColors.inkMuted),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: Space.lg),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(top: large ? Space.xs : 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          tier.label,
+                          style: AppType.label.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ).tone(
+                                score >= 60
+                                    ? AppColors.accent
+                                    : AppColors.inkSecondary,
+                              ),
+                        ),
+                      ),
+                      ?trailing,
+                    ],
+                  ),
+                  const SizedBox(height: Space.xs),
+                  Text(
+                    tier.meaning,
+                    style: AppType.bodySmall.quieter,
+                    maxLines: showMeaning ? 4 : 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (!large) ...<Widget>[
+                    const SizedBox(height: Space.sm),
+                    SizedBox(
+                      width: 140,
+                      child: MatchScoreScale(
+                        score: score,
+                        height: 3,
+                        showTicks: false,
                       ),
                     ),
                   ],
-                ),
+                ],
               ),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: Space.sm),
-          Text(
-            tier.label.toUpperCase(),
-            style: AppType.micro.tone(AppColors.inkSecondary),
-          ),
-          if (showMeaning) ...<Widget>[
-            const SizedBox(height: Space.xs),
-            SizedBox(
-              width: 280,
-              child: Text(tier.meaning, style: AppType.bodySmall.quieter),
             ),
-          ],
-          SizedBox(height: large ? Space.lg : Space.md),
-          MatchScoreScale(score: score),
+          ),
         ],
       ),
     );
   }
 }
 
+class _ScoreRingPainter extends CustomPainter {
+  _ScoreRingPainter({required this.value, required this.large});
+
+  final double value;
+  final bool large;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Offset center = Offset(size.width / 2, size.height / 2);
+    final double stroke = large ? 4 : 3;
+    final double radius = size.width / 2 - stroke;
+    final Rect rect = Rect.fromCircle(center: center, radius: radius);
+
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = AppColors.rule,
+    );
+
+    final Paint arc = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = AppColors.accent;
+
+    final double sweep = (value.clamp(0, 100) / 100) * math.pi * 2;
+    canvas.drawArc(rect, -math.pi / 2, sweep, false, arc);
+
+    // Graduations at each fifth. A measuring ring, not a progress donut.
+    final Paint tick = Paint()
+      ..strokeWidth = 1
+      ..color = AppColors.ruleStrong;
+    for (int i = 0; i < 5; i++) {
+      final double a = -math.pi / 2 + (i / 5) * math.pi * 2;
+      final Offset from = Offset(
+        center.dx + math.cos(a) * (radius + stroke + 3),
+        center.dy + math.sin(a) * (radius + stroke + 3),
+      );
+      final Offset to = Offset(
+        center.dx + math.cos(a) * (radius + stroke + (large ? 6 : 5)),
+        center.dy + math.sin(a) * (radius + stroke + (large ? 6 : 5)),
+      );
+      canvas.drawLine(from, to, tick);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ScoreRingPainter old) =>
+      old.value != value || old.large != large;
+}
+
 /// The five dimensions, each on one shared scale, so the weights are visible
-/// rather than described. A subject score of 40 draws a full-length bar; a
-/// format score of 10 draws a quarter-length one. The reader can see why the
-/// totals differ without being told about weights at all.
+/// rather than described. The reader can see why the totals differ without
+/// being told about weights at all.
 class ScoreBreakdown extends StatelessWidget {
   const ScoreBreakdown({
     required this.score,
@@ -236,6 +318,11 @@ class _DimensionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool full = value >= dimension.max;
     final bool none = value == 0;
+    final Color ink = none
+        ? AppColors.inkMuted
+        : full
+            ? AppColors.accepted
+            : AppColors.accent;
 
     return Semantics(
       label: '${dimension.label}: $value out of ${dimension.max}',
@@ -255,42 +342,36 @@ class _DimensionRow extends StatelessWidget {
                   ),
                 ),
               ),
-              Text(
-                '$value',
-                style: AppType.figure.tone(full ? AppColors.accepted : AppColors.ink),
-              ),
-              Text(
-                ' / ${dimension.max}',
-                style: AppType.bodySmall.quieter,
-              ),
+              Text('$value', style: AppType.figure.tone(ink)),
+              Text(' / ${dimension.max}', style: AppType.bodySmall.quieter),
             ],
           ),
           const SizedBox(height: Space.sm),
-          // The shared 0-40 scale: every bar starts at the same origin and its
-          // track length is its own weight. Comparable across rows.
           LayoutBuilder(
             builder: (BuildContext context, BoxConstraints c) {
               final double track = c.maxWidth * (dimension.max / 40);
               final double fill = track * (value / dimension.max);
               return SizedBox(
-                height: 6,
+                height: 5,
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: SizedBox(
                     width: track,
                     child: DecoratedBox(
-                      decoration: const BoxDecoration(color: AppColors.rule),
+                      decoration: BoxDecoration(
+                        color: AppColors.rule,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         child: AnimatedContainer(
-                          duration: Motion.slow,
+                          duration: Motion.respect(context, Motion.slow),
                           curve: Motion.ease,
                           width: fill,
-                          color: none
-                              ? AppColors.ruleStrong
-                              : value >= dimension.max
-                                  ? AppColors.accepted
-                                  : AppColors.accent,
+                          decoration: BoxDecoration(
+                            color: ink,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
                         ),
                       ),
                     ),

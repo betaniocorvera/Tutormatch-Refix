@@ -4,6 +4,7 @@
 // label, or a "Nearby" reason.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/screens/matches_screen.dart';
@@ -13,6 +14,7 @@ import 'package:tutormatch/widgets/location_map.dart';
 import 'package:tutormatch/widgets/tm_icon.dart';
 
 void main() {
+  setUpAll(_loadBundledFonts);
   group('the place catalogue', () {
     test('has at least twelve unique areas with plausible coordinates', () {
       expect(samplePlaces.length, greaterThanOrEqualTo(12));
@@ -208,4 +210,29 @@ void main() {
     expect(find.text('Approximate areas'), findsOneWidget);
     expect(find.text('Map tiles need a connection.'), findsOneWidget);
   });
+}
+
+/// Registers the bundled faces under the names the theme asks for, so a test
+/// measures the same text the browser draws.
+Future<void> _loadBundledFonts() async {
+  Future<void> family(String name, List<String> assets) async {
+    final FontLoader loader = FontLoader(name);
+    for (final String asset in assets) {
+      loader.addFont(rootBundle.load(asset));
+    }
+    await loader.load();
+  }
+
+  await family('Bricolage Grotesque', <String>[
+    'assets/fonts/BricolageGrotesque-Variable.ttf',
+  ]);
+  await family('Figtree', <String>['assets/fonts/Figtree-Variable.ttf']);
+  await family('IBM Plex Mono', <String>[
+    'assets/fonts/IBMPlexMono-Regular.ttf',
+    'assets/fonts/IBMPlexMono-Medium.ttf',
+  ]);
+  await family('PhosphorRegular', <String>[
+    'assets/fonts/PhosphorRegular.ttf',
+  ]);
+  await family('PhosphorBold', <String>['assets/fonts/PhosphorBold.ttf']);
 }

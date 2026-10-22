@@ -7,6 +7,10 @@
 // how many people it removed, and offers the smallest change that would bring
 // them back — one button, one filter, reversible.
 //
+// A caller may hand it an illustration — the results screen gives it the same
+// neighbour map the landing page uses — and a row of suggestions. Both are
+// optional, so the quiet ruled version remains the default.
+//
 // The copy is generated in mock_data.dart from the filters that actually fired,
 // so it cannot drift out of date when the filters change.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,6 +31,9 @@ class TMEmptyState extends StatelessWidget {
     this.onSecondary,
     this.filters = const <Widget>[],
     this.filtersLabel,
+    this.illustration,
+    this.suggestionsLabel,
+    this.suggestions = const <Widget>[],
     super.key,
   });
 
@@ -44,18 +51,21 @@ class TMEmptyState extends StatelessWidget {
   final List<Widget> filters;
   final String? filtersLabel;
 
+  /// A live drawing of the space the filters left empty, when the caller has one.
+  final Widget? illustration;
+
+  /// Shortcuts back into the pool: subjects that do have people behind them.
+  final String? suggestionsLabel;
+  final List<Widget> suggestions;
+
   @override
   Widget build(BuildContext context) {
     final bool wide = TMLayout.isWide(context);
 
-    return TMEntry(
-      padding: EdgeInsets.all(wide ? Space.xxl : Space.xl),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          // Three rules of decreasing length, standing in for the list that
-          // should be here. It is drawn from the same hairline as everything
-          // else, so it reads as an unfinished page rather than a broken image.
+    final Widget copy = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        if (illustration == null)
           Row(
             children: <Widget>[
               for (final double w in <double>[56, 40, 24])
@@ -74,49 +84,82 @@ class TMEmptyState extends StatelessWidget {
                 ),
             ],
           ),
+        if (illustration == null) const SizedBox(height: Space.xl),
+        SizedBox(
+          width: 520,
+          child: Text(headline, style: AppType.titleLarge),
+        ),
+        const SizedBox(height: Space.md),
+        SizedBox(
+          width: 560,
+          child: Text(body, style: AppType.bodyLarge.quiet),
+        ),
+        if (suggestions.isNotEmpty) ...<Widget>[
           const SizedBox(height: Space.xl),
-          SizedBox(
-            width: 520,
-            child: Text(headline, style: AppType.titleLarge),
-          ),
+          TMMicroLabelText(suggestionsLabel ?? 'Try one of these instead'),
           const SizedBox(height: Space.md),
-          SizedBox(
-            width: 560,
-            child: Text(body, style: AppType.bodyLarge.quiet),
-          ),
-          if (filters.isNotEmpty) ...<Widget>[
-            const SizedBox(height: Space.xl),
-            const TMRule(),
-            const SizedBox(height: Space.lg),
-            TMMicroLabelText(filtersLabel ?? "What you're filtering on"),
-            const SizedBox(height: Space.md),
-            Wrap(spacing: Space.sm, runSpacing: Space.sm, children: filters),
-          ],
-          if (primaryLabel != null) ...<Widget>[
-            const SizedBox(height: Space.xxl),
-            Wrap(
-              spacing: Space.md,
-              runSpacing: Space.sm,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
+          Wrap(spacing: Space.sm, runSpacing: Space.sm, children: suggestions),
+        ],
+        if (filters.isNotEmpty) ...<Widget>[
+          const SizedBox(height: Space.xl),
+          const TMRule(),
+          const SizedBox(height: Space.lg),
+          TMMicroLabelText(filtersLabel ?? "What you're filtering on"),
+          const SizedBox(height: Space.md),
+          Wrap(spacing: Space.sm, runSpacing: Space.sm, children: filters),
+        ],
+        if (primaryLabel != null) ...<Widget>[
+          const SizedBox(height: Space.xxl),
+          Wrap(
+            spacing: Space.md,
+            runSpacing: Space.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              TMButton(
+                label: primaryLabel!,
+                icon: TMIconName.arrowRight,
+                onPressed: onPrimary,
+                minHeight: Hit.min,
+              ),
+              if (secondaryLabel != null)
                 TMButton(
-                  label: primaryLabel!,
-                  icon: TMIconName.arrowRight,
-                  onPressed: onPrimary,
+                  label: secondaryLabel!,
+                  variant: TMButtonVariant.quiet,
+                  onPressed: onSecondary,
                   minHeight: Hit.min,
                 ),
-                if (secondaryLabel != null)
-                  TMButton(
-                    label: secondaryLabel!,
-                    variant: TMButtonVariant.quiet,
-                    onPressed: onSecondary,
-                    minHeight: Hit.min,
-                  ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ],
-      ),
+      ],
+    );
+
+    final Widget content;
+    if (illustration == null) {
+      content = copy;
+    } else if (wide) {
+      content = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(flex: 6, child: copy),
+          const SizedBox(width: Space.xxl),
+          Expanded(flex: 5, child: illustration!),
+        ],
+      );
+    } else {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          illustration!,
+          const SizedBox(height: Space.xl),
+          copy,
+        ],
+      );
+    }
+
+    return TMEntry(
+      padding: EdgeInsets.all(wide ? Space.xxl : Space.xl),
+      child: content,
     );
   }
 }
@@ -149,7 +192,7 @@ class TMFilterTag extends StatelessWidget {
           focused: s.focused,
           radius: Radii.pill,
           child: AnimatedContainer(
-            duration: Motion.fast,
+            duration: Motion.respect(context, Motion.fast),
             curve: Motion.ease,
             constraints: const BoxConstraints(minHeight: 34),
             padding: const EdgeInsets.only(

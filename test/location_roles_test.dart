@@ -117,7 +117,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 1200));
 
-    await tester.tap(find.text('A tutor'));
+    await tester.tap(find.text('Tutor'));
     await tester.pump();
     await tester.enterText(find.byType(TextField).at(0), 'tutor@example.com');
     await tester.enterText(find.byType(TextField).at(1), 'longenough');
@@ -297,8 +297,9 @@ void main() {
       size: const Size(1100, 1800),
     );
 
+    // The redesigned list carries distance inside each result card rather
+    // than in a table column header.
     expect(find.textContaining('km away'), findsWidgets);
-    expect(find.text('DISTANCE'), findsOneWidget);
 
     await tester.tap(find.text('Map'));
     await tester.pump();
@@ -340,11 +341,16 @@ Future<void> _loadBundledFonts() async {
     await loader.load();
   }
 
-  await family('Spectral', <String>[
-    'assets/fonts/Spectral-Regular.ttf',
-    'assets/fonts/Spectral-Italic.ttf',
-    'assets/fonts/Spectral-SemiBold.ttf',
-    'assets/fonts/Spectral-Bold.ttf',
+  await family('Bricolage Grotesque', <String>[
+    'assets/fonts/BricolageGrotesque-Variable.ttf',
   ]);
-  await family('Public Sans', <String>['assets/fonts/PublicSans-Variable.ttf']);
+  await family('Figtree', <String>['assets/fonts/Figtree-Variable.ttf']);
+  await family('IBM Plex Mono', <String>[
+    'assets/fonts/IBMPlexMono-Regular.ttf',
+    'assets/fonts/IBMPlexMono-Medium.ttf',
+  ]);
+  await family('PhosphorRegular', <String>[
+    'assets/fonts/PhosphorRegular.ttf',
+  ]);
+  await family('PhosphorBold', <String>['assets/fonts/PhosphorBold.ttf']);
 }

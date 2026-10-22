@@ -59,9 +59,10 @@ class _LoginScreenState extends State<LoginScreen> {
     // the student profile — including its location — and every tutor-only
     // field would be missing.
     state.profile = _role == Role.student ? demoStudentProfile : demoTutorProfile;
+    state.signIn();
     Future<void>.delayed(const Duration(milliseconds: 520), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed(Routes.matches);
+      AuthFlow.complete(context);
     });
   }
 
@@ -70,7 +71,8 @@ class _LoginScreenState extends State<LoginScreen> {
     state.role = _role;
     state.profile = _role == Role.student ? demoStudentProfile : demoTutorProfile;
     state.profileAnswered = true;
-    Navigator.of(context).pushReplacementNamed(Routes.matches);
+    state.signIn();
+    AuthFlow.complete(context);
   }
 
   @override

@@ -1958,8 +1958,7 @@ class _AccountTrailing extends StatelessWidget {
               label: 'Sign out',
               variant: TMButtonVariant.quiet,
               minHeight: Hit.min,
-              onPressed: () => Navigator.of(context)
-                  .popUntil((Route<void> route) => route.isFirst),
+              onPressed: () => AuthFlow.signOut(context),
             ),
           ],
         );

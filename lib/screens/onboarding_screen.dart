@@ -97,7 +97,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     state.clearFilters();
     Future<void>.delayed(const Duration(milliseconds: 620), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed(Routes.matches);
+      AuthFlow.complete(context);
     });
   }
 
@@ -107,7 +107,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     state.profile = _isStudent ? demoStudentProfile : demoTutorProfile;
     state.profileAnswered = true;
     state.clearFilters();
-    Navigator.of(context).pushReplacementNamed(Routes.matches);
+    AuthFlow.complete(context);
   }
 
   @override

@@ -19,6 +19,7 @@
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -51,6 +52,7 @@ class NeighborMap3D extends StatefulWidget {
     this.onSelect,
     this.background = AppColors.ink,
     this.showLegend = true,
+    this.progress,
     super.key,
   });
 
@@ -65,6 +67,12 @@ class NeighborMap3D extends StatefulWidget {
   final ValueChanged<NeighborNode>? onSelect;
   final Color background;
   final bool showLegend;
+
+  /// Optional scroll drive, 0 to 1. At 0 every person waits on the outer ring;
+  /// at 1 rank decides the ring. The landing page damps the scroll into this
+  /// value before handing it over, so the arrival is weighted rather than
+  /// linear. A null value keeps the map exactly as it was everywhere else.
+  final ValueListenable<double>? progress;
 
   @override
   State<NeighborMap3D> createState() => _NeighborMap3DState();
@@ -104,6 +112,7 @@ class _NeighborMap3DState extends State<NeighborMap3D>
     WidgetsBinding.instance.addObserver(this);
     _orbit.addListener(_tick);
     _pulse.addListener(_tick);
+    widget.progress?.addListener(_onProgress);
   }
 
   @override
@@ -125,6 +134,10 @@ class _NeighborMap3DState extends State<NeighborMap3D>
   @override
   void didUpdateWidget(NeighborMap3D oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.progress, widget.progress)) {
+      oldWidget.progress?.removeListener(_onProgress);
+      widget.progress?.addListener(_onProgress);
+    }
     if (oldWidget.searchTick != widget.searchTick) {
       _tappedId = null;
       if (!_reduce) _pulse.forward(from: 0);
@@ -133,6 +146,7 @@ class _NeighborMap3DState extends State<NeighborMap3D>
 
   @override
   void dispose() {
+    widget.progress?.removeListener(_onProgress);
     WidgetsBinding.instance.removeObserver(this);
     _scrollPosition?.removeListener(_scheduleVisibility);
     _orbit.removeListener(_tick);
@@ -152,6 +166,11 @@ class _NeighborMap3DState extends State<NeighborMap3D>
     if (!mounted) return;
     final Offset next = Offset.lerp(_tilt, _tiltTarget, 0.16)!;
     setState(() => _tilt = next);
+  }
+
+  void _onProgress() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _syncMotion() {
@@ -260,6 +279,15 @@ class _NeighborMap3DState extends State<NeighborMap3D>
     final double ringProgress = 0.88 + 0.12 * t;
     final String? active = _activeId;
 
+    // A caller may scrub the whole field with a scroll value. At rest everyone
+    // waits on the outer ring; as the value approaches one, rank pulls each
+    // person inward. Damping happens upstream, so this only shapes the journey.
+    final ValueListenable<double>? drive = widget.progress;
+    final double arrival = drive == null
+        ? 1
+        : Curves.easeOutCubic.transform(drive.value.clamp(0.0, 1.0));
+    final double presence = drive == null ? 1 : 0.42 + 0.58 * arrival;
+
     // Closeness is the map's one promise, so it must survive any caller that
     // hands the nodes over in another order. The nearest ring and the largest
     // disc belong to the highest score, in order.
@@ -270,10 +298,14 @@ class _NeighborMap3DState extends State<NeighborMap3D>
     final List<_NodeLayout> layouts = <_NodeLayout>[];
     for (int i = 0; i < count; i++) {
       final int ring = math.min(2, (i * 3) ~/ count);
-      final double ringFactor = <double>[0.6, 0.82, 1.0][ring];
+      final double settledRing = <double>[0.6, 0.82, 1.0][ring];
+      final double settledDepth = <double>[0.30, 0.36, 0.42][ring];
+      final double ringFactor =
+          drive == null ? settledRing : 1.0 + (settledRing - 1.0) * arrival;
+      final double depthFactor =
+          drive == null ? settledDepth : 0.42 + (settledDepth - 0.42) * arrival;
       final double radiusX = base * ringFactor * ringProgress;
-      final double radiusY =
-          radiusX * <double>[0.30, 0.36, 0.42][ring] * ringProgress;
+      final double radiusY = radiusX * depthFactor * ringProgress;
       final double phase =
           (i / count) * math.pi * 2 + angle + _manualSpin + ring * 0.65;
       final double depth = math.sin(phase) * (1 - ring * 0.06);
@@ -281,9 +313,10 @@ class _NeighborMap3DState extends State<NeighborMap3D>
       final double closeness = count == 1 ? 1 : 1 - i / (count - 1);
       // Rank sets the size; depth only breathes ±3% around it, so a nearer
       // match can never end up drawn smaller than a distant one.
-      final double scale = isActive
-          ? 1.28
-          : (0.82 + 0.25 * closeness) * (0.97 + 0.03 * ((depth + 1) / 2));
+      final double scale = (isActive
+              ? 1.28
+              : (0.82 + 0.25 * closeness) * (0.97 + 0.03 * ((depth + 1) / 2))) *
+          (drive == null ? 1 : 0.78 + 0.22 * arrival);
       final double radius = baseDisc * scale;
       final Offset position = Offset(
         center.dx + math.cos(phase) * radiusX,
@@ -297,9 +330,10 @@ class _NeighborMap3DState extends State<NeighborMap3D>
           position: position,
           radius: radius,
           depth: depth,
-          opacity: isActive
-              ? 1
-              : (0.52 + 0.30 * closeness + 0.18 * ((depth + 1) / 2)),
+          opacity: (isActive
+                  ? 1
+                  : (0.52 + 0.30 * closeness + 0.18 * ((depth + 1) / 2))) *
+              presence,
           active: isActive,
           top: ordered[i].score == _topScore(ordered),
         ),

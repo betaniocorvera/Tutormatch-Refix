@@ -64,6 +64,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       state.profile = state.profile.copyWith(name: trimmed);
     }
     state.profileAnswered = false;
+    // Registration is the moment the account exists. The five answers are the
+    // second half of sign-up, so onboarding stays reachable after this, and the
+    // pending dashboard destination survives until those answers are done.
+    state.signIn();
     // A real sign-up is a round trip. Held for a beat so the busy state is a
     // state and not a flash, and so the label has time to be read.
     Future<void>.delayed(const Duration(milliseconds: 520), () {

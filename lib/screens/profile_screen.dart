@@ -144,9 +144,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label: 'Sign out',
                 variant: TMButtonVariant.quiet,
                 minHeight: Hit.min,
-                onPressed: () =>
-                    Navigator.of(context)
-                        .popUntil((Route<void> r) => r.isFirst),
+                onPressed: () => AuthFlow.signOut(context),
               ),
             ],
           );

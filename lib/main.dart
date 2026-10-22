@@ -68,7 +68,8 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
         title: 'TutorMatch A.I.',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
-        initialRoute: Routes.landing,
+        // No fixed initialRoute: on the web this lets /#/matches and /#/chat
+        // reach the guard instead of being replaced by the landing page.
         onGenerateRoute: _route,
         // Keyboard order follows reading order, which matters most on the
         // onboarding form where every answer is a control.
@@ -80,13 +81,53 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
     );
   }
 
+  /// Every dashboard route. Landing, Login and Register are deliberately not
+  /// in this set; onboarding is protected because it is the second half of
+  /// registration and must not be reachable as a stranger.
+  static bool _isProtected(String? name) =>
+      name == Routes.matches ||
+      name == Routes.matchDetail ||
+      name == Routes.requests ||
+      name == Routes.messages ||
+      name == Routes.chat ||
+      name == Routes.profile ||
+      name == Routes.profilePreview ||
+      name == Routes.onboarding;
+
+  static bool _isAuthEntry(String? name) =>
+      name == Routes.login || name == Routes.register;
+
+  /// The only route gate in the app. Screens never check [AppState.isSignedIn]
+  /// themselves: a named route either builds its page or is replaced by Login
+  /// here, which is also what makes Back and a typed URL take the same path.
   Route<void> _route(RouteSettings settings) {
+    final String? name = settings.name;
     final Object? args = settings.arguments;
 
-    Route<void> build(Widget child) =>
-        TMTransitions.page<void>(child, name: settings.name);
+    Route<void> build(Widget child, {String? name}) =>
+        TMTransitions.page<void>(child, name: name ?? settings.name);
 
-    switch (settings.name) {
+    if (!_state.isSignedIn && _isProtected(name)) {
+      // Remember where the visitor was going, including a match result or a
+      // conversation id. Onboarding is a registration step, not a destination,
+      // so it is redirected without being remembered.
+      if (name != Routes.onboarding) {
+        _state.rememberDestination(name!, args);
+      }
+      return build(
+        LoginScreen(initialRole: _state.role),
+        name: Routes.login,
+      );
+    }
+
+    if (_state.isSignedIn && _isAuthEntry(name)) {
+      // A signed-in visitor has no business on the auth forms, and a stale
+      // destination must not send them back to one after this.
+      _state.clearPendingDestination();
+      return build(const MatchesScreen(), name: Routes.matches);
+    }
+
+    switch (name) {
       case Routes.register:
         final Role role = args is Role ? args : Role.student;
         return build(RegisterScreen(initialRole: role));
@@ -118,5 +159,33 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
       default:
         return build(const LandingScreen());
     }
+  }
+}
+
+/// The two navigation moves both sides of the auth boundary share.
+abstract final class AuthFlow {
+  /// Called after a successful sign-in or after the five answers at the end of
+  /// registration. Returns to the page the visitor originally asked for, or the
+  /// ranked list when they started at Login/Register directly.
+  static void complete(BuildContext context) {
+    final AppState state = AppStateScope.read(context);
+    final PendingDestination destination = state.takePendingDestination() ??
+        const PendingDestination(Routes.matches);
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      destination.route,
+      (Route<dynamic> route) => false,
+      arguments: destination.arguments,
+    );
+  }
+
+  /// Clear the session before replacing the whole stack, so neither a pop nor
+  /// browser Back can reveal a dashboard route retained from the signed-in
+  /// session.
+  static void signOut(BuildContext context) {
+    AppStateScope.read(context).signOut();
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      Routes.landing,
+      (Route<dynamic> route) => false,
+    );
   }
 }

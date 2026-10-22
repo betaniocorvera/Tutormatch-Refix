@@ -2,9 +2,10 @@
 // In-memory application state.
 //
 // This is the ONLY place the UI keeps anything. There is no persistence, no
-// session, no token and no network: reload the page and you are back to the
-// demo profiles at the bottom of mock_data.dart. That is deliberate — it keeps
-// the interface honest about being an interface.
+// token and no network: reload the page and you are back to the demo profiles
+// at the bottom of mock_data.dart. That is deliberate — it keeps the interface
+// honest about being an interface. Signing in is an in-memory flag for this
+// tab only; it is what the route guard reads and writes.
 //
 // Everything here is a plain ChangeNotifier behind an InheritedNotifier. No
 // state-management package, because the whole surface is one object.
@@ -16,6 +17,15 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:tutormatch/data/mock_data.dart';
 import 'package:tutormatch/theme/app_theme.dart';
+
+/// The protected page a signed-out visitor asked for before being sent to sign
+/// in. Kept with its arguments so a map node or chat URL survives the detour.
+class PendingDestination {
+  const PendingDestination(this.route, [this.arguments]);
+
+  final String route;
+  final Object? arguments;
+}
 
 class AppState extends ChangeNotifier {
   /// Which side of the marketplace you are standing on. Set once, by register,
@@ -43,6 +53,49 @@ class AppState extends ChangeNotifier {
     _profile = value;
     notifyListeners();
   }
+
+  // ── Session ────────────────────────────────────────────────────────────────
+  //
+  // There is no real account behind the forms, but there is still a real
+  // boundary between the public pages and the dashboard. One flag owns it, and
+  // one route guard reads it, so Back and a typed URL cannot slip past.
+
+  bool _signedIn = false;
+  bool get isSignedIn => _signedIn;
+
+  /// Called only after a form or demo sign-in has completed its field setup.
+  void signIn() {
+    if (_signedIn) return;
+    _signedIn = true;
+    notifyListeners();
+  }
+
+  /// Clearing this flag is what makes the dashboard unreachable until the next
+  /// sign-in. The navigation itself lives in [AuthFlow.signOut].
+  void signOut() {
+    if (!_signedIn && _pendingDestination == null) return;
+    _signedIn = false;
+    _pendingDestination = null;
+    notifyListeners();
+  }
+
+  PendingDestination? _pendingDestination;
+
+  /// The page a signed-out visitor originally asked for. Never notified: it is
+  /// consumed by the next route decision, not drawn by a widget.
+  PendingDestination? get pendingDestination => _pendingDestination;
+
+  void rememberDestination(String route, [Object? arguments]) {
+    _pendingDestination = PendingDestination(route, arguments);
+  }
+
+  PendingDestination? takePendingDestination() {
+    final PendingDestination? destination = _pendingDestination;
+    _pendingDestination = null;
+    return destination;
+  }
+
+  void clearPendingDestination() => _pendingDestination = null;
 
   /// The viewer's own picture, in memory only: bytes, not a path and not a URL,
   /// because there is no filesystem and no server behind this prototype. Every

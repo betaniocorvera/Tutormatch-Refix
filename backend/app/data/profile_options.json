@@ -1,0 +1,53 @@
+{
+  "student_styles": [
+    "Watch one worked example, then do the next one myself",
+    "Start from the theory and derive everything",
+    "Talk it through until it makes sense",
+    "Drill past papers under time pressure",
+    "Learn it by building or making something"
+  ],
+  "tutor_styles": [
+    "I work through examples slowly and let the student steer",
+    "I go back to first principles and build up",
+    "I teach by discussion and questioning",
+    "I run timed practice and review the errors",
+    "I teach by getting the student to build something"
+  ],
+  "student_goals": [
+    "Pass a specific exam that is coming up",
+    "Move up a grade or two this year",
+    "Understand the subject properly, not just pass it",
+    "Catch up on foundations I missed earlier",
+    "Decide whether to take this subject further"
+  ],
+  "tutor_goals": [
+    "Fill a few steady evenings a week",
+    "Take on one or two exam-year students before mocks",
+    "Work with beginners who need foundations rebuilt",
+    "Teach the hardest material to students who want it",
+    "Build up reviews and a regular timetable"
+  ],
+  "languages": [
+    "English",
+    "Arabic",
+    "Bengali",
+    "French",
+    "German",
+    "Igbo",
+    "Italian",
+    "Japanese",
+    "Mandarin",
+    "Polish",
+    "Portuguese",
+    "Spanish",
+    "Swedish",
+    "Tamil",
+    "Twi"
+  ],
+  "genders": [
+    "Female",
+    "Male",
+    "Non-binary",
+    "Prefer not to say"
+  ]
+}

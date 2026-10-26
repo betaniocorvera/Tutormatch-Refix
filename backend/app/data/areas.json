@@ -1,0 +1,306 @@
+{
+  "regions": [
+    "Greater London",
+    "North West England",
+    "Wales",
+    "Yorkshire and the Humber",
+    "Scotland",
+    "Victoria",
+    "Porto",
+    "Île-de-France",
+    "South West England",
+    "West Midlands",
+    "South Yorkshire",
+    "Somerset",
+    "Auvergne-Rhône-Alpes",
+    "Oxfordshire",
+    "Cairo Governorate",
+    "Nottinghamshire",
+    "South Holland",
+    "East Sussex"
+  ],
+  "cities": [
+    {
+      "id": "london",
+      "name": "London",
+      "region": "Greater London",
+      "latitude": 51.5072,
+      "longitude": -0.1276
+    },
+    {
+      "id": "manchester",
+      "name": "Manchester",
+      "region": "North West England",
+      "latitude": 53.4808,
+      "longitude": -2.2426
+    },
+    {
+      "id": "cardiff",
+      "name": "Cardiff",
+      "region": "Wales",
+      "latitude": 51.4816,
+      "longitude": -3.1791
+    },
+    {
+      "id": "leeds",
+      "name": "Leeds",
+      "region": "Yorkshire and the Humber",
+      "latitude": 53.8008,
+      "longitude": -1.5491
+    },
+    {
+      "id": "edinburgh",
+      "name": "Edinburgh",
+      "region": "Scotland",
+      "latitude": 55.9533,
+      "longitude": -3.1883
+    },
+    {
+      "id": "melbourne",
+      "name": "Melbourne",
+      "region": "Victoria",
+      "latitude": -37.8136,
+      "longitude": 144.9631
+    },
+    {
+      "id": "porto",
+      "name": "Porto",
+      "region": "Porto",
+      "latitude": 41.1579,
+      "longitude": -8.6291
+    },
+    {
+      "id": "paris",
+      "name": "Paris",
+      "region": "Île-de-France",
+      "latitude": 48.8566,
+      "longitude": 2.3522
+    },
+    {
+      "id": "bristol",
+      "name": "Bristol",
+      "region": "South West England",
+      "latitude": 51.4545,
+      "longitude": -2.5879
+    },
+    {
+      "id": "birmingham",
+      "name": "Birmingham",
+      "region": "West Midlands",
+      "latitude": 52.4862,
+      "longitude": -1.8904
+    },
+    {
+      "id": "sheffield",
+      "name": "Sheffield",
+      "region": "South Yorkshire",
+      "latitude": 53.3811,
+      "longitude": -1.4701
+    },
+    {
+      "id": "bath",
+      "name": "Bath",
+      "region": "Somerset",
+      "latitude": 51.3811,
+      "longitude": -2.3590
+    },
+    {
+      "id": "lyon",
+      "name": "Lyon",
+      "region": "Auvergne-Rhône-Alpes",
+      "latitude": 45.7640,
+      "longitude": 4.8357
+    },
+    {
+      "id": "oxford",
+      "name": "Oxford",
+      "region": "Oxfordshire",
+      "latitude": 51.7520,
+      "longitude": -1.2577
+    },
+    {
+      "id": "cairo",
+      "name": "Cairo",
+      "region": "Cairo Governorate",
+      "latitude": 30.0444,
+      "longitude": 31.2357
+    },
+    {
+      "id": "nottingham",
+      "name": "Nottingham",
+      "region": "Nottinghamshire",
+      "latitude": 52.9548,
+      "longitude": -1.1581
+    },
+    {
+      "id": "rotterdam",
+      "name": "Rotterdam",
+      "region": "South Holland",
+      "latitude": 51.9244,
+      "longitude": 4.4777
+    },
+    {
+      "id": "brighton",
+      "name": "Brighton",
+      "region": "East Sussex",
+      "latitude": 50.8225,
+      "longitude": -0.1372
+    }
+  ],
+  "areas": [
+    {
+      "id": "london-highbury",
+      "name": "Highbury",
+      "city_id": "london",
+      "latitude": 51.5520,
+      "longitude": -0.0970
+    },
+    {
+      "id": "london-camden",
+      "name": "Camden",
+      "city_id": "london",
+      "latitude": 51.5390,
+      "longitude": -0.1426
+    },
+    {
+      "id": "london-hackney",
+      "name": "Hackney",
+      "city_id": "london",
+      "latitude": 51.5450,
+      "longitude": -0.0553
+    },
+    {
+      "id": "london-islington",
+      "name": "Islington",
+      "city_id": "london",
+      "latitude": 51.5416,
+      "longitude": -0.1022
+    },
+    {
+      "id": "manchester-northern-quarter",
+      "name": "Northern Quarter",
+      "city_id": "manchester",
+      "latitude": 53.4837,
+      "longitude": -2.2346
+    },
+    {
+      "id": "manchester-didsbury",
+      "name": "Didsbury",
+      "city_id": "manchester",
+      "latitude": 53.4165,
+      "longitude": -2.2310
+    },
+    {
+      "id": "cardiff-riverside",
+      "name": "Riverside",
+      "city_id": "cardiff",
+      "latitude": 51.4860,
+      "longitude": -3.2000
+    },
+    {
+      "id": "leeds-hyde-park",
+      "name": "Hyde Park",
+      "city_id": "leeds",
+      "latitude": 53.8080,
+      "longitude": -1.5660
+    },
+    {
+      "id": "edinburgh-leith",
+      "name": "Leith",
+      "city_id": "edinburgh",
+      "latitude": 55.9800,
+      "longitude": -3.1700
+    },
+    {
+      "id": "melbourne-fitzroy",
+      "name": "Fitzroy",
+      "city_id": "melbourne",
+      "latitude": -37.7983,
+      "longitude": 144.9781
+    },
+    {
+      "id": "porto-cedofeita",
+      "name": "Cedofeita",
+      "city_id": "porto",
+      "latitude": 41.1550,
+      "longitude": -8.6200
+    },
+    {
+      "id": "paris-montmartre",
+      "name": "Montmartre",
+      "city_id": "paris",
+      "latitude": 48.8867,
+      "longitude": 2.3431
+    },
+    {
+      "id": "bristol-clifton",
+      "name": "Clifton",
+      "city_id": "bristol",
+      "latitude": 51.4620,
+      "longitude": -2.6200
+    },
+    {
+      "id": "birmingham-moseley",
+      "name": "Moseley",
+      "city_id": "birmingham",
+      "latitude": 52.4460,
+      "longitude": -1.8880
+    },
+    {
+      "id": "sheffield-crookes",
+      "name": "Crookes",
+      "city_id": "sheffield",
+      "latitude": 53.3840,
+      "longitude": -1.5080
+    },
+    {
+      "id": "bath-widcombe",
+      "name": "Widcombe",
+      "city_id": "bath",
+      "latitude": 51.3750,
+      "longitude": -2.3560
+    },
+    {
+      "id": "lyon-croix-rousse",
+      "name": "Croix-Rousse",
+      "city_id": "lyon",
+      "latitude": 45.7740,
+      "longitude": 4.8320
+    },
+    {
+      "id": "oxford-jericho",
+      "name": "Jericho",
+      "city_id": "oxford",
+      "latitude": 51.7620,
+      "longitude": -1.2670
+    },
+    {
+      "id": "cairo-zamalek",
+      "name": "Zamalek",
+      "city_id": "cairo",
+      "latitude": 30.0600,
+      "longitude": 31.2190
+    },
+    {
+      "id": "nottingham-hockley",
+      "name": "Hockley",
+      "city_id": "nottingham",
+      "latitude": 52.9520,
+      "longitude": -1.1460
+    },
+    {
+      "id": "rotterdam-kralingen",
+      "name": "Kralingen",
+      "city_id": "rotterdam",
+      "latitude": 51.9240,
+      "longitude": 4.5100
+    },
+    {
+      "id": "brighton-kemptown",
+      "name": "Kemptown",
+      "city_id": "brighton",
+      "latitude": 50.8190,
+      "longitude": -0.1250
+    }
+  ]
+}

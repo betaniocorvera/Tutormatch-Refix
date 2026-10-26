@@ -1,0 +1,60 @@
+{
+  "subjects": [
+    {
+      "id": "algebra",
+      "name": "Algebra"
+    },
+    {
+      "id": "geometry",
+      "name": "Geometry"
+    },
+    {
+      "id": "calculus",
+      "name": "Calculus"
+    },
+    {
+      "id": "statistics",
+      "name": "Statistics"
+    },
+    {
+      "id": "physics",
+      "name": "Physics"
+    },
+    {
+      "id": "chemistry",
+      "name": "Chemistry"
+    },
+    {
+      "id": "biology",
+      "name": "Biology"
+    },
+    {
+      "id": "english-literature",
+      "name": "English Literature"
+    },
+    {
+      "id": "essay-writing",
+      "name": "Essay Writing"
+    },
+    {
+      "id": "history",
+      "name": "History"
+    },
+    {
+      "id": "spanish",
+      "name": "Spanish"
+    },
+    {
+      "id": "computer-science",
+      "name": "Computer Science"
+    },
+    {
+      "id": "music-theory",
+      "name": "Music Theory"
+    },
+    {
+      "id": "sat-prep",
+      "name": "SAT Prep"
+    }
+  ]
+}

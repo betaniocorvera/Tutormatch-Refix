@@ -21,7 +21,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -66,34 +67,49 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     );
   }
 
-  /// Deterministic, and computed from the characters rather than from
-  /// `String.hashCode`, which is seeded per run on the VM. The same person
-  /// always produces the same reference here, so a screenshot can be checked
-  /// against a second run of the app.
-  String get _reference {
-    int n = 0;
-    for (final int unit in widget.result.candidate.id.codeUnits) {
-      n = (n * 31 + unit) % 9000;
-    }
-    return 'TM-${n + 1000}';
+  bool _busy = false;
+
+  String _referenceFor(String id) {
+    final String compact = id.replaceAll('-', '').toUpperCase();
+    final String tail =
+        compact.length > 6 ? compact.substring(compact.length - 6) : compact;
+    return 'TM-$tail';
   }
 
-  void _send() {
+  Future<void> _send() async {
     final String note = _note.text.trim();
     if (note.length < 12) {
       setState(() => _noteError = 'Add a little more: which day suits you, and '
           'what you want out of the first lesson. Notes like that get answered.');
       return;
     }
+    final AppState state = AppStateScope.read(context);
+    final String? subject = state.sharedSubjectFor(widget.result.candidate);
+    if (subject == null) {
+      setState(() => _noteError =
+          'You do not share a subject with this person yet. Add one of their '
+          'subjects to your profile before sending a request.');
+      return;
+    }
     setState(() {
       _noteError = null;
-      _sent = true;
+      _busy = true;
     });
-    final AppState state = AppStateScope.read(context);
-    state.lastRequestReference = _reference;
-    // The request is also a conversation from this moment on: pending, so the
-    // chat is locked until the other side accepts it.
-    state.startConversation(widget.result.candidate, note: note);
+    try {
+      final MatchRequest request = await state.createRequest(
+        candidate: widget.result.candidate,
+        subject: subject,
+        note: note,
+      );
+      if (!mounted) return;
+      state.lastRequestReference = _referenceFor(request.id);
+      setState(() => _sent = true);
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _noteError = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// The live conversation with this person, once a request has turned into
@@ -111,28 +127,17 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
   Widget build(BuildContext context) {
     final AppState state = AppStateScope.of(context);
 
-    // Re-scored against the profile as it stands now, so a detail screen opened
-    // before an availability change is not showing last week's arithmetic.
-    final MatchResult result = rank(state.pool, state.profile).firstWhere(
-      (MatchResult r) => r.candidate.id == widget.result.candidate.id,
-      orElse: () => widget.result,
-    );
+    final MatchResult result =
+        state.matchFor(widget.result.candidate.id) ?? widget.result;
     final Candidate c = result.candidate;
     final String? when = describeOverlap(result.score.overlap);
-    // The viewer's own side of the conversation: either a student's list of
-    // tutors or a tutor's list of students — whichever it is, it holds both
-    // requests sent and requests received.
-    final List<MatchRequest> inbox = state.role == Role.student
-        ? sampleRequests
-        : sampleReceivedRequests;
-    // A request sent from here becomes a conversation in the same breath, so
-    // the conversation list is the honest check for "already asked": the static
-    // inbox cannot see what was sent a minute ago.
     final Conversation? chat = _chatWith(state, c.id);
+    final MatchRequest? request = state.requestWith(c.id);
     final bool alreadyAsked = _sent ||
-        chat != null ||
-        inbox.any((MatchRequest r) =>
-            r.counterpartId == c.id && r.status != RequestStatus.declined);
+        (request != null && request.status != RequestStatus.declined) ||
+        chat != null;
+    final String reference = state.lastRequestReference ??
+        (request == null ? '' : _referenceFor(request.id));
 
     final Widget person = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -199,9 +204,10 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       alreadyAsked: alreadyAsked,
       chat: chat,
       student: state.role == Role.student,
-      reference: _reference,
+      reference: reference,
       note: _note,
       noteError: _noteError,
+      busy: _busy,
       onChanged: () => setState(() => _noteError = null),
       onSend: _send,
       fromProfile: state.profileAnswered,
@@ -396,6 +402,7 @@ class _ActionPanel extends StatelessWidget {
     required this.reference,
     required this.note,
     required this.noteError,
+    required this.busy,
     required this.onChanged,
     required this.onSend,
     required this.fromProfile,
@@ -412,6 +419,7 @@ class _ActionPanel extends StatelessWidget {
   final String reference;
   final TextEditingController note;
   final String? noteError;
+  final bool busy;
   final VoidCallback onChanged;
   final VoidCallback onSend;
   final bool fromProfile;
@@ -423,8 +431,8 @@ class _ActionPanel extends StatelessWidget {
     // live conversation the static inbox says it — a student's list is their
     // outbox, a tutor's is what arrived.
     final bool askedByMe = chat?.requestedByMe ?? student;
-    // With a live conversation the answer lives in Messages; a static sample
-    // request has no conversation behind it and still points at Requests.
+    // With a live conversation the answer lives in Messages; a request that has
+    // no conversation yet still points at Requests.
     final String destination = chat == null ? Routes.requests : Routes.messages;
     final String name = result.candidate.name;
 
@@ -512,6 +520,7 @@ class _ActionPanel extends StatelessWidget {
             _RequestForm(
               note: note,
               noteError: noteError,
+              busy: busy,
               onChanged: onChanged,
               onSend: onSend,
               name: result.candidate.name,
@@ -527,6 +536,7 @@ class _RequestForm extends StatelessWidget {
   const _RequestForm({
     required this.note,
     required this.noteError,
+    required this.busy,
     required this.onChanged,
     required this.onSend,
     required this.name,
@@ -535,6 +545,7 @@ class _RequestForm extends StatelessWidget {
 
   final TextEditingController note;
   final String? noteError;
+  final bool busy;
   final VoidCallback onChanged;
   final VoidCallback onSend;
   final String name;
@@ -570,11 +581,13 @@ class _RequestForm extends StatelessWidget {
           label: 'Send request',
           expand: true,
           icon: TMIconName.arrowRight,
-          onPressed: onSend,
+          busy: busy,
+          busyLabel: 'Sending the request…',
+          onPressed: busy ? null : onSend,
         ),
         const SizedBox(height: Space.md),
         Text(
-          'Nothing is emailed in this prototype — sending only changes this panel.',
+          'The request is saved to your account and appears in Messages. Nothing is emailed.',
           style: AppType.bodySmall.quieter,
         ),
       ],
@@ -639,9 +652,9 @@ class _SentConfirmation extends StatelessWidget {
         TMInlineNote(
           tone: StatusTone.accepted,
           title: 'Sent to $name.',
-          body: 'Reference $reference. The request is waiting in Messages — the '
-              'chat opens there the moment they accept it. Nothing was emailed: '
-              'this is a prototype, and the request only exists inside it.',
+          body: 'Reference $reference. The request is waiting in Requests — the '
+              'chat opens in Messages the moment they accept it. Nothing was '
+              'emailed; the request is stored on the TutorMatch server.',
         ),
         const SizedBox(height: Space.lg),
         Wrap(

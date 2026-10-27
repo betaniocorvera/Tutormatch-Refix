@@ -1,13 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Register.
 //
-// Three fields, because three is what the rest of the product needs. Signing up
-// with Google and signing up with an email are presented as equal alternatives
-// rather than one primary and one afterthought, and both do the same thing:
-// move to onboarding. There is no account, because there is no server.
+// Three fields, then the five answers. The account is created by the backend;
+// the password is hashed there and never kept in the client.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:tutormatch/data/api_client.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/screens/auth_shell.dart';
 import 'package:tutormatch/state/app_state.dart';
@@ -33,6 +32,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   String? _emailError;
   String? _passwordError;
+  String? _error;
   bool _busy = false;
 
   @override
@@ -43,40 +43,46 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final String? emailError = validateEmail(_email.text);
     final String? passwordError = validatePassword(_password.text, isNew: true);
     setState(() {
       _emailError = emailError;
       _passwordError = passwordError;
+      _error = null;
     });
     if (emailError != null || passwordError != null) return;
 
     setState(() => _busy = true);
-    _complete();
-  }
-
-  void _complete() {
     final AppState state = AppStateScope.read(context);
-    state.role = _role;
-    final String trimmed = _name.text.trim();
-    if (trimmed.isNotEmpty) {
-      state.profile = state.profile.copyWith(name: trimmed);
-    }
-    state.profileAnswered = false;
-    // Registration is the moment the account exists. The five answers are the
-    // second half of sign-up, so onboarding stays reachable after this, and the
-    // pending dashboard destination survives until those answers are done.
-    state.signIn();
-    // A real sign-up is a round trip. Held for a beat so the busy state is a
-    // state and not a flash, and so the label has time to be read.
-    Future<void>.delayed(const Duration(milliseconds: 520), () {
+    try {
+      await state.register(
+        email: _email.text.trim(),
+        password: _password.text,
+        role: _role,
+        displayName: _name.text.trim(),
+      );
       if (!mounted) return;
       Navigator.of(context).pushReplacementNamed(
         Routes.onboarding,
         arguments: _role,
       );
-    });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _googleUnavailable() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Google sign-up is not configured. Create an email account instead.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -85,12 +91,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       role: _role,
       onRoleChanged: (Role r) => setState(() => _role = r),
       title: 'Create your account',
-      lede: 'Two things, then five questions. Nothing you type here is stored, '
-          'sent or checked against anything.',
+      lede: 'Two things, then five questions. The account is real: your password '
+          'is hashed by the backend and the session survives a reload.',
       nextSteps: const <String>[
         'Five questions about subjects, how you like to work, and the hours you actually keep free.',
         'A ranked list, with the score, three reasons, and the hours you both have open.',
-        'Nothing is saved. Reload the page and you are back at the start.',
+        'Your answers are saved, so signing out does not throw them away.',
       ],
       switchPrompt: 'Already have an account?',
       switchLabel: 'Sign in instead',
@@ -103,20 +109,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            AuthRoleSwitch(role: _role, onChanged: (Role r) => setState(() => _role = r)),
+            AuthRoleSwitch(
+              role: _role,
+              onChanged: (Role r) => setState(() => _role = r),
+            ),
             const SizedBox(height: Space.xl),
             TMButton(
               label: 'Continue with Google',
               variant: TMButtonVariant.secondary,
               expand: true,
-              onPressed: _busy ? null : _complete,
+              onPressed: _busy ? null : _googleUnavailable,
             ),
             const SizedBox(height: Space.xl),
             const AuthDivider(label: 'or use an email address'),
             const SizedBox(height: Space.xl),
             TMTextField(
               label: 'Your name',
-              reason: 'Shown on your profile. Only tutors you contact can see it.',
+              reason: 'Shown on your profile. Only people you contact can see it.',
               controller: _name,
               hint: _role == Role.student ? 'Maya Chen' : 'Amara Okonkwo',
               textInputAction: TextInputAction.next,
@@ -129,7 +138,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               error: _emailError,
-              helper: 'Where a tutor would reply. Never shown on your profile.',
+              helper: 'Where the other side replies. Never shown on your public profile.',
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: Space.lg),
@@ -140,9 +149,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
               obscure: true,
               textInputAction: TextInputAction.done,
               error: _passwordError,
-              helper: 'Eight characters or more. This is not sent anywhere.',
+              helper: 'Eight characters or more. Stored as a hash, never as text.',
               onSubmitted: (_) => _submit(),
             ),
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: Space.md),
+              Text(
+                _error!,
+                style: AppType.bodySmall.tone(AppColors.alert),
+              ),
+            ],
             const SizedBox(height: Space.xl),
             TMButton(
               label: 'Create account and answer five questions',
@@ -150,12 +166,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
               busy: _busy,
               busyLabel: 'Creating your account…',
               icon: TMIconName.arrowRight,
-              onPressed: _submit,
+              onPressed: _busy ? null : _submit,
             ),
             const SizedBox(height: Space.lg),
             Text(
-              'By continuing you would normally agree to terms of service. There '
-              'are none in this prototype — nothing here leaves the page.',
+              'By continuing you agree to keep the conversation useful and '
+              'respectful. The backend validates every field before it stores it.',
               style: AppType.bodySmall.quieter,
             ),
           ],

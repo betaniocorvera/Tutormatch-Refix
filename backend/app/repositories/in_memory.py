@@ -14,9 +14,11 @@ from typing import Any
 
 from ..errors import DuplicateEmailError
 from ..models.auth import RefreshToken
+from ..models.chat import Conversation
 from ..models.profile import Profile
 from ..models.user import User
 from .interfaces import (
+    ConversationRepository,
     ProfileRepository,
     RefreshTokenRepository,
     UserRepository,
@@ -208,3 +210,67 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepository):
             for item in state:
                 token = RefreshToken.model_validate(item)
                 self._tokens[token.jti] = token
+
+
+class InMemoryConversationRepository(ConversationRepository):
+    def __init__(self, on_change: ChangeCallback | None = None) -> None:
+        self._conversations: dict[str, Conversation] = {}
+        self._on_change = on_change or _noop
+        self._lock = threading.RLock()
+
+    def get_by_id(self, conversation_id: str) -> Conversation | None:
+        with self._lock:
+            return self._conversations.get(conversation_id)
+
+    def get_between(
+        self,
+        first_user_id: str,
+        second_user_id: str,
+    ) -> Conversation | None:
+        pair = {first_user_id, second_user_id}
+        if len(pair) != 2:
+            return None
+        with self._lock:
+            for conversation in self._conversations.values():
+                if {
+                    conversation.student_id,
+                    conversation.tutor_id,
+                } == pair:
+                    return conversation
+        return None
+
+    def add(self, conversation: Conversation) -> None:
+        with self._lock:
+            if conversation.id in self._conversations:
+                raise ValueError(
+                    f"Conversation already exists: {conversation.id}"
+                )
+            self._conversations[conversation.id] = conversation
+        self._on_change()
+
+    def update(self, conversation: Conversation) -> None:
+        with self._lock:
+            if conversation.id not in self._conversations:
+                raise KeyError(
+                    f"Unknown conversation: {conversation.id}"
+                )
+            self._conversations[conversation.id] = conversation
+        self._on_change()
+
+    def list_all(self) -> list[Conversation]:
+        with self._lock:
+            return list(self._conversations.values())
+
+    def export_state(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                conversation.model_dump(mode="json")
+                for conversation in self._conversations.values()
+            ]
+
+    def import_state(self, state: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self._conversations.clear()
+            for item in state:
+                conversation = Conversation.model_validate(item)
+                self._conversations[conversation.id] = conversation

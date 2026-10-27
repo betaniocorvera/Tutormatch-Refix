@@ -12,6 +12,8 @@ from .container import AppContainer
 from .errors import InvalidToken
 from .models.user import User
 from .services.auth import AuthService
+from .services.chat import ChatService
+from .services.matching import MatchingService
 from .services.profile import ProfileService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -31,6 +33,18 @@ def get_profile_service(
     container: Annotated[AppContainer, Depends(get_container)],
 ) -> ProfileService:
     return container.profile
+
+
+def get_matching_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> MatchingService:
+    return container.matching
+
+
+def get_chat_service(
+    container: Annotated[AppContainer, Depends(get_container)],
+) -> ChatService:
+    return container.chat
 
 
 def get_catalog(
@@ -54,5 +68,10 @@ def get_current_user(
 ContainerDep = Annotated[AppContainer, Depends(get_container)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
+MatchingServiceDep = Annotated[
+    MatchingService,
+    Depends(get_matching_service),
+]
+ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
 CatalogDep = Annotated[Catalog, Depends(get_catalog)]
 CurrentUser = Annotated[User, Depends(get_current_user)]

@@ -1,18 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // The avatar.
 //
-// There are no photographs of anybody else in this product and there will not
-// be: everybody in the pool is sample data, and a stock face would be a lie
-// with better lighting. So most people here are their initials on a flat dye,
+// There are no stock faces in this product: a stock face would be a lie with
+// better lighting. People without a picture are their initials on a flat dye,
 // rounded like a card rather than circled like a social profile.
 //
 // The dye is deterministic from the name, so the same person is the same colour
-// on the map, in the list and on their own page without storing anything. Four
-// of the sample people carry an explicit tint; the rest are assigned one.
+// on the map, in the list and on their own page without storing anything. A
+// caller may supply an explicit tint; otherwise one is assigned.
 //
-// The one real photograph is the picture the person using the app picked from
-// their own device. It arrives as bytes from app state, is never uploaded, and
-// falls back to the initials the moment it is removed.
+// A real photograph comes from the API and arrives as bytes in app state. It
+// falls back to the initials when no picture exists or the picture is removed.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:typed_data';
@@ -33,12 +31,11 @@ class TMAvatar extends StatelessWidget {
   final String name;
   final double size;
 
-  /// The real picture, when the person using the app has set one. Bytes rather
-  /// than a path, because it lives in memory for as long as the tab does.
+  /// The real picture, when the API has one. Bytes rather than a URL because
+  /// the media endpoint is private and needs the bearer token.
   final Uint8List? photo;
 
-  /// The flat dye that stands in for a picture on a few of the sample people.
-  /// Null means the deterministic dye below.
+  /// An optional flat dye. Null means the deterministic dye below.
   final Color? tint;
 
   /// Set to the same tag on a list row and a detail header to carry the avatar

@@ -73,6 +73,11 @@ class InvalidPhoto(AppError):
     detail = "That file is not a supported image."
 
 
+class InvalidMatchFilters(AppError):
+    status_code = 422
+    detail = "Those match filters are not valid."
+
+
 class PhotoTooLarge(AppError):
     status_code = 413
     detail = "That image is too large. Choose one under 5 MB."
@@ -81,6 +86,66 @@ class PhotoTooLarge(AppError):
 class PhotoNotFound(AppError):
     status_code = 404
     detail = "No photo is set for that user."
+
+
+class RequestNotFound(AppError):
+    status_code = 404
+    detail = "That request was not found."
+
+
+class ConversationNotFound(AppError):
+    status_code = 404
+    detail = "That conversation was not found."
+
+
+class MessageNotFound(AppError):
+    status_code = 404
+    detail = "That message was not found."
+
+
+class MediaNotFound(AppError):
+    status_code = 404
+    detail = "That attachment is no longer available."
+
+
+class RequestAlreadyExists(AppError):
+    status_code = 409
+    detail = "There is already an open request with that person."
+
+
+class RequestAlreadyAnswered(AppError):
+    status_code = 409
+    detail = "That request has already been answered."
+
+
+class ConversationLocked(AppError):
+    status_code = 409
+    detail = "Accept the request before using the chat."
+
+
+class InvalidRequest(AppError):
+    status_code = 422
+    detail = "That request is not valid."
+
+
+class InvalidMessage(AppError):
+    status_code = 422
+    detail = "That message is not valid."
+
+
+class InvalidPagination(AppError):
+    status_code = 422
+    detail = "Those message pagination options are not valid."
+
+
+class InvalidAttachment(AppError):
+    status_code = 422
+    detail = "That attachment is not a supported file."
+
+
+class AttachmentTooLarge(AppError):
+    status_code = 413
+    detail = "That attachment is too large."
 
 
 class Forbidden(AppError):

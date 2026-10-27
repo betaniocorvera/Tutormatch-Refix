@@ -17,11 +17,14 @@
 // shows exactly what a match page would draw.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/catalog.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -50,6 +53,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// are copied into the draft when editing begins and only reach app state on
   /// Save.
   bool _editing = false;
+  bool _saving = false;
 
   /// The small in-page preview turns on its own axis; the full preview route
   /// stays exactly where it was, this is only a second reading beside the form.
@@ -212,10 +216,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// The profile the meter and the header read while editing: the saved one
   /// plus whatever the draft has changed so far. Nothing here reaches app
   /// state — Save does that.
-  Profile _draft(Profile p) => p.copyWith(
+  Profile _draft(Profile p, AppState state) => p.copyWith(
     name: _editing ? _name.text : null,
     birthdate: _editing ? _birthdate : null,
-    livesIn: _editing ? (placeById(_placeId)?.label ?? '') : null,
+    livesIn: _editing ? (state.placeById(_placeId)?.label ?? '') : null,
     placeId: _editing ? _placeId : null,
     locationPrivacy: _editing ? _locationPrivacy : null,
     statusText: _editing ? _statusText.text : null,
@@ -230,7 +234,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   );
 
   Widget _identity(BuildContext context, AppState state) {
-    final Profile p = _draft(state.profile);
+    final Profile p = _draft(state.profile, state);
     final List<(String, bool)> gaps = p.profileGaps(
       hasPicture: state.photo != null,
     );
@@ -347,12 +351,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       TMButton(
         label: 'Save changes',
         icon: TMIconName.check,
-        onPressed: () => _save(state),
+        busy: _saving,
+        busyLabel: 'Saving…',
+        onPressed: _saving ? null : () => _save(state),
       ),
       TMButton(
         label: 'Cancel',
         variant: TMButtonVariant.quiet,
-        onPressed: () => setState(() => _editing = false),
+        onPressed: _saving ? null : () => setState(() => _editing = false),
       ),
     ] else ...<Widget>[
       TMButton(
@@ -390,7 +396,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
-  void _save(AppState state) {
+  Future<void> _save(AppState state) async {
     final String name = _name.text.trim();
     setState(() {
       _nameError = name.isEmpty
@@ -400,29 +406,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
     if (_nameError != null) return;
 
-    final Place? place = placeById(_placeId);
-    state.profile = state.profile.copyWith(
-      name: name,
-      birthdate: _birthdate,
-      livesIn: place?.label ?? '',
-      placeId: place?.id ?? '',
-      locationPrivacy: _locationPrivacy,
-      statusText: _statusText.text.trim(),
-      presence: _presence,
-      bio: _bio.text.trim(),
-      gender: _gender,
-      languages: _languages.toList(),
-      years: int.tryParse(_years.text.trim()),
-      clearYears: _years.text.trim().isEmpty,
-      education: _education.text.trim(),
-      grade: _grade.text.trim(),
-    );
-    setState(() => _editing = false);
-    _say('Profile updated');
+    final Place? place = state.placeById(_placeId);
+    setState(() => _saving = true);
+    try {
+      await state.updateProfile(state.profile.copyWith(
+        name: name,
+        birthdate: _birthdate,
+        clearBirthdate: _birthdate == null,
+        livesIn: place?.label ?? '',
+        placeId: place?.id ?? '',
+        clearPlace: place == null,
+        publicPlaceValue:
+            state.publicPlaceFor(place?.id, _locationPrivacy),
+        clearPublicPlace: place == null,
+        locationPrivacy: _locationPrivacy,
+        statusText: _statusText.text.trim(),
+        presence: _presence,
+        bio: _bio.text.trim(),
+        gender: _gender,
+        languages: _languages.toList(),
+        years: int.tryParse(_years.text.trim()),
+        clearYears: _years.text.trim().isEmpty,
+        education: _education.text.trim(),
+        grade: _grade.text.trim(),
+      ));
+      if (!mounted) return;
+      setState(() => _editing = false);
+      _say('Profile saved.');
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      _say(error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// Applies an answer immediately and persists it. The five answers are live
+  /// controls, so there is no Save button between the tap and the ranking.
+  Future<void> _updateAnswers(AppState state, Profile next) async {
+    try {
+      await state.updateProfile(next);
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    }
   }
 
   /// The one snackbar on this screen. It reports what happened and says the
-  /// thing worth knowing about it — that it happened in memory.
+  /// thing worth knowing about it.
   void _say(String text) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -443,8 +473,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted || choice == null) return;
 
     if (choice == 'remove') {
-      state.photo = null;
-      _say('Picture removed — the initials are back.');
+      try {
+        await state.deletePhoto();
+        _say('Picture removed — the initials are back.');
+      } on ApiException catch (error) {
+        _say(error.message);
+      }
       return;
     }
 
@@ -457,8 +491,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (file == null || !mounted) return;
       final Uint8List bytes = await file.readAsBytes();
       if (!mounted) return;
-      state.photo = bytes;
-      _say('Picture set. It lives in memory only — nothing was uploaded.');
+      await state.uploadPhoto(bytes, file.name.isEmpty ? 'photo.jpg' : file.name);
+      if (!mounted) return;
+      _say('Picture uploaded. The server strips metadata and stores the re-encoded image.');
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
     } on Exception {
       // A browser with no file picker, or a cancelled permission: say so
       // rather than dying on a tap.
@@ -650,6 +687,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _LocationFields(
           placeId: _placeId,
           privacy: _locationPrivacy,
+          cities: state.cities,
+          places: state.places,
           onPlaceChanged: (String id) => setState(() => _placeId = id),
           onPrivacyChanged: (LocationPrivacy privacy) =>
               setState(() => _locationPrivacy = privacy),
@@ -775,7 +814,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               '${MatchDimension.subjects.max} of 100 points. '
               '${MatchDimension.subjects.explainer}',
           child: TMTagPicker(
-            options: OnboardingOptions.subjects,
+            options: state.subjects,
             selected: p.subjects.toSet(),
             max: 4,
             maxReachedNote:
@@ -785,7 +824,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onToggle: (String s) {
               final Set<String> next = <String>{...p.subjects};
               if (!next.remove(s)) next.add(s);
-              state.profile = p.copyWith(subjects: next.toList());
+              _updateAnswers(state, p.copyWith(subjects: next.toList()));
             },
           ),
         ),
@@ -801,7 +840,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: AvailabilityEditor(
             value: p.availability,
             onChanged: (List<bool> next) =>
-                state.profile = p.copyWith(availability: next),
+                _updateAnswers(state, p.copyWith(availability: next)),
           ),
         ),
 
@@ -819,7 +858,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: TMChoiceList<String>(
               options: styles,
               selected: p.style,
-              onSelect: (String s) => state.profile = p.copyWith(style: s),
+              onSelect: (String s) =>
+                  _updateAnswers(state, p.copyWith(style: s)),
               labelOf: (String s) => s,
             ),
           ),
@@ -843,7 +883,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
                 selected: p.mode,
                 onSelect: (SessionMode m) =>
-                    state.profile = p.copyWith(mode: m),
+                    _updateAnswers(state, p.copyWith(mode: m)),
                 labelOf: (SessionMode m) => m.label,
               ),
               const SizedBox(height: Space.sm),
@@ -874,7 +914,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: <Widget>[
               TMBudgetScale(
                 value: p.budget,
-                onChanged: (int v) => state.profile = p.copyWith(budget: v),
+                onChanged: (int v) =>
+                    _updateAnswers(state, p.copyWith(budget: v)),
               ),
               const SizedBox(height: Space.sm),
               Text(
@@ -903,7 +944,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: TMChoiceList<String>(
               options: goals,
               selected: p.goal,
-              onSelect: (String g) => state.profile = p.copyWith(goal: g),
+              onSelect: (String g) =>
+                  _updateAnswers(state, p.copyWith(goal: g)),
               labelOf: (String g) => g,
             ),
           ),
@@ -934,7 +976,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const TMMicroLabelText('Two readings'),
         const SizedBox(height: Space.md),
         _ProfileFlipPreview(
-          profile: _draft(state.profile),
+          profile: _draft(state.profile, state),
           photo: state.photo,
           flipped: _previewFlipped,
           onFlip: () => setState(() => _previewFlipped = !_previewFlipped),
@@ -967,20 +1009,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const SizedBox(height: Space.sm),
         Text(
           'The ranking uses your answers the moment you change them. This takes '
-          'you to the result — ${state.pool.length} '
-          '${state.role == Role.student ? 'tutors' : 'students'} in the pool.',
+          'you to the result — ${state.rankedCount} of ${state.poolSize} '
+          '${state.role == Role.student ? 'tutors' : 'students'} ranked.',
           style: AppType.bodySmall.quieter,
         ),
         const SizedBox(height: Space.xxl),
 
         const TMInlineNote(
           tone: StatusTone.neutral,
-          title: 'None of this is saved',
+          title: 'Saved to your account',
           body:
-              'TutorMatch is an interface prototype with no accounts behind '
-              'it. The answers above live in memory for as long as this tab is '
-              'open, and reloading puts you back to the sample profile. Nothing '
-              'is sent to a server, because there is no server.',
+              'Your profile, picture and five answers are stored by the '
+              'TutorMatch API. Signing out and back in restores them; changing '
+              'an answer re-ranks the list against the saved profile.',
         ),
       ],
     );
@@ -1001,45 +1042,64 @@ class _LocationFields extends StatelessWidget {
   const _LocationFields({
     required this.placeId,
     required this.privacy,
+    required this.cities,
+    required this.places,
     required this.onPlaceChanged,
     required this.onPrivacyChanged,
   });
 
   final String placeId;
   final LocationPrivacy privacy;
+  final List<City> cities;
+  final List<Place> places;
   final ValueChanged<String> onPlaceChanged;
   final ValueChanged<LocationPrivacy> onPrivacyChanged;
 
+  Place? _place(String id) {
+    for (final Place place in places) {
+      if (place.id == id) return place;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final Place? place = placeById(placeId);
+    final Place? place = _place(placeId);
     final City? city = place?.city;
     final List<String> regions =
-        sampleCities.map((City c) => c.region).toSet().toList()..sort();
-    final List<City> cities = city == null
+        cities.map((City c) => c.region).toSet().toList()..sort();
+    final List<City> cityOptions = city == null
         ? const <City>[]
-        : sampleCities
+        : cities
               .where((City c) => c.region == city.region)
               .toList(growable: false);
-    final List<Place> places = city == null
+    final List<Place> placeOptions = city == null
         ? const <Place>[]
-        : samplePlaces
-              .where((Place p) => p.city.name == city.name)
+        : places
+              .where((Place p) => p.city.id == city.id)
               .toList(growable: false);
 
     final Widget cityField = TMDropdown<City>(
       key: const Key('place-city'),
       label: 'City / municipality',
       value: city,
-      options: cities,
-      enabled: cities.isNotEmpty,
+      options: cityOptions,
+      enabled: cityOptions.isNotEmpty,
       hint: 'Choose a city',
       labelOf: (City c) => c.name,
       onChanged: (City next) {
-        final Place first = samplePlaces.firstWhere(
-          (Place p) => p.city.name == next.name,
-        );
-        onPlaceChanged(first.id);
+        for (final Place first in placeOptions) {
+          if (first.city.id == next.id) {
+            onPlaceChanged(first.id);
+            return;
+          }
+        }
+        for (final Place first in places) {
+          if (first.city.id == next.id) {
+            onPlaceChanged(first.id);
+            return;
+          }
+        }
       },
     );
 
@@ -1047,8 +1107,8 @@ class _LocationFields extends StatelessWidget {
       key: const Key('place-area'),
       label: 'Barangay / area',
       value: place,
-      options: places,
-      enabled: places.isNotEmpty,
+      options: placeOptions,
+      enabled: placeOptions.isNotEmpty,
       hint: 'Choose an area',
       labelOf: (Place p) => p.name,
       onChanged: (Place next) => onPlaceChanged(next.id),
@@ -1056,10 +1116,11 @@ class _LocationFields extends StatelessWidget {
 
     // This is the owner's preview, so it is centred on the chosen area and
     // does not depend on the privacy setting. When no area has been chosen yet
-    // the map still appears, centred on the catalogue's default place, with a
+    // the map still appears, centred on the catalogue's first area, with a
     // caption that asks for one. Privacy governs what other people see; it
     // never removes this map.
-    final Place mapPlace = place ?? samplePlaces.first;
+    final Place? mapPlace =
+        place ?? (places.isEmpty ? null : places.first);
     final bool hasPlace = place != null;
 
     return Column(
@@ -1074,17 +1135,24 @@ class _LocationFields extends StatelessWidget {
           options: regions,
           hint: 'Choose a province or region',
           reason:
-              'The built-in list is small and offline on purpose: this is a '
-              'prototype, not an address lookup.',
+              'The list comes from the backend catalogue, so the same areas '
+              'are available on every device.',
           labelOf: (String region) => region,
           onChanged: (String region) {
-            final City firstCity = sampleCities.firstWhere(
-              (City c) => c.region == region,
-            );
-            final Place firstPlace = samplePlaces.firstWhere(
-              (Place p) => p.city.name == firstCity.name,
-            );
-            onPlaceChanged(firstPlace.id);
+            City? firstCity;
+            for (final City candidate in cities) {
+              if (candidate.region == region) {
+                firstCity = candidate;
+                break;
+              }
+            }
+            if (firstCity == null) return;
+            for (final Place candidate in places) {
+              if (candidate.city.id == firstCity.id) {
+                onPlaceChanged(candidate.id);
+                return;
+              }
+            }
           },
         ),
         const SizedBox(height: Space.lg),
@@ -1111,41 +1179,48 @@ class _LocationFields extends StatelessWidget {
           },
         ),
         const SizedBox(height: Space.lg),
-        LocationMap(
-          centerLatitude: mapPlace.latitude,
-          centerLongitude: mapPlace.longitude,
-          height: 190,
-          caption: hasPlace ? mapPlace.label : 'Choose your area',
-          captionNote: hasPlace
-              ? switch (privacy) {
-                  LocationPrivacy.area => 'visible to others',
-                  LocationPrivacy.cityOnly => 'others see the city',
-                  LocationPrivacy.hidden => 'preview only',
-                }
-              : null,
-          fallbackTitle: hasPlace ? mapPlace.label : 'Choose your area',
-          semanticLabel: hasPlace
-              ? 'Map preview of ${mapPlace.label}. ${privacy.explanation}'
-              : 'Map preview centred on a default place. Choose your area.',
-        ),
-        const SizedBox(height: Space.sm),
-        Text(
-          !hasPlace
-              ? 'Choose a region, city and area to set the centre of this '
-                    'preview.'
-              : switch (privacy) {
-                  LocationPrivacy.area =>
-                    'Others will see ${mapPlace.label} and a circle of about '
-                        '1–2 km.',
-                  LocationPrivacy.cityOnly =>
-                    'Others will see ${mapPlace.city.name} and a circle around '
-                        'its centre — not ${mapPlace.name}.',
-                  LocationPrivacy.hidden =>
-                    'This preview is only for you. Others will see no map, no '
-                        'area and no distance.',
-                },
-          style: AppType.bodySmall.tone(AppColors.inkSecondary),
-        ),
+        if (mapPlace != null) ...<Widget>[
+          LocationMap(
+            centerLatitude: mapPlace.latitude,
+            centerLongitude: mapPlace.longitude,
+            height: 190,
+            caption: hasPlace ? mapPlace.label : 'Choose your area',
+            captionNote: hasPlace
+                ? switch (privacy) {
+                    LocationPrivacy.area => 'visible to others',
+                    LocationPrivacy.cityOnly => 'others see the city',
+                    LocationPrivacy.hidden => 'preview only',
+                  }
+                : null,
+            fallbackTitle: hasPlace ? mapPlace.label : 'Choose your area',
+            semanticLabel: hasPlace
+                ? 'Map preview of ${mapPlace.label}. ${privacy.explanation}'
+                : 'Map preview centred on a default place. Choose your area.',
+          ),
+          const SizedBox(height: Space.sm),
+          Text(
+            !hasPlace
+                ? 'Choose a region, city and area to set the centre of this '
+                      'preview.'
+                : switch (privacy) {
+                    LocationPrivacy.area =>
+                      'Others will see ${mapPlace.label} and a circle of about '
+                          '1–2 km.',
+                    LocationPrivacy.cityOnly =>
+                      'Others will see ${mapPlace.city.name} and a circle around '
+                          'its centre — not ${mapPlace.name}.',
+                    LocationPrivacy.hidden =>
+                      'This preview is only for you. Others will see no map, no '
+                          'area and no distance.',
+                  },
+            style: AppType.bodySmall.tone(AppColors.inkSecondary),
+          ),
+        ] else
+          Text(
+            'The area catalogue has not loaded. Check that the API is running '
+            'before choosing where you live.',
+            style: AppType.bodySmall.tone(AppColors.alert),
+          ),
         const SizedBox(height: Space.xl),
         const TMFieldLabel(
           label: 'Location privacy',
@@ -1942,8 +2017,7 @@ class _DateField extends StatelessWidget {
 }
 
 /// The picture sheet: choose, remove, or leave it. A line says where the
-/// picture actually lives, because "no server" is the sort of thing this
-/// product says out loud rather than leaving a person to guess.
+/// picture actually goes, because the upload is real and metadata is stripped.
 class _PictureSheet extends StatelessWidget {
   const _PictureSheet({required this.hasPicture});
 
@@ -1968,9 +2042,9 @@ class _PictureSheet extends StatelessWidget {
               ),
               const SizedBox(height: Space.lg),
               Text(
-                'Pick a picture from this device. It is held in memory for as '
-                'long as this tab is open and sent nowhere — there is no server '
-                'to send it to.',
+                'Pick a picture from this device. It is uploaded to the '
+                'TutorMatch API, which strips metadata and re-encodes it before '
+                'storing it. Only signed-in people can load it.',
                 style: AppType.bodySmall.quieter,
               ),
               const SizedBox(height: Space.lg),

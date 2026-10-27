@@ -12,7 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/tm_button.dart';
@@ -992,8 +992,8 @@ class TMFooter extends StatelessWidget {
                       ),
                       Expanded(
                         child: Text(
-                          'Interface prototype. Every tutor, student, score and review '
-                          'on this site is sample data.',
+                          'Interface prototype. People, scores and messages come '
+                          'from the TutorMatch API.',
                           style: AppType.bodySmall.quieter,
                         ),
                       ),

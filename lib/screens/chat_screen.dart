@@ -22,7 +22,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/screens/call_screen.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -59,15 +60,13 @@ class _ChatScreenState extends State<ChatScreen> {
   /// The composer draws its own focus edge around the field and its tools.
   final FocusNode _composerFocus = FocusNode();
 
-  /// The typing row appears and disappears without changing the message count,
-  /// so it gets its own edge detector.
-  bool _wasTyping = false;
-
   bool _emojiOpen = false;
   bool _attachOpen = false;
+  bool _sending = false;
+  Timer? _poll;
 
-  /// Recording is a local simulation: a timer, a red dot, and a duration. No
-  /// microphone is opened and no audio is ever produced.
+  /// Recording is a local simulation: a timer, a red dot, and a duration. The
+  /// server records the resulting voice note, but no microphone is opened.
   bool _recording = false;
   Duration _recorded = Duration.zero;
   Timer? _recordTimer;
@@ -87,6 +86,18 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _composerFocus.addListener(_onComposerFocus);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final AppState state = AppStateScope.read(context);
+      final Conversation? current = state.conversation(widget.conversationId);
+      if (current == null || current.messages.isEmpty) {
+        unawaited(state.loadConversation(widget.conversationId));
+      }
+      _poll = Timer.periodic(const Duration(seconds: 5), (Timer _) {
+        if (!mounted) return;
+        unawaited(state.refreshConversation(widget.conversationId));
+      });
+    });
   }
 
   void _onComposerFocus() {
@@ -96,6 +107,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _recordTimer?.cancel();
+    _poll?.cancel();
     _composerFocus.dispose();
     _text.dispose();
     _scroll.dispose();
@@ -104,13 +116,21 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ── Sending ────────────────────────────────────────────────────────────────
 
-  void _sendText() {
+  Future<void> _sendText() async {
+    if (_sending) return;
     final String text = _text.text.trim();
     if (text.isEmpty) return;
-    _text.clear();
-    AppStateScope.read(context).sendMessage(widget.conversationId, text);
-    // The field is now empty, so the send button has to go back to disabled.
-    setState(() {});
+    setState(() => _sending = true);
+    try {
+      await AppStateScope.read(context)
+          .sendMessage(widget.conversationId, text);
+      if (!mounted) return;
+      _text.clear();
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   Future<void> _pickPhoto() async {
@@ -136,11 +156,19 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _sendPhoto() {
+  Future<void> _sendPhoto() async {
     final Uint8List? photo = _pendingPhoto;
-    if (photo == null) return;
-    AppStateScope.read(context).sendImage(widget.conversationId, photo);
-    setState(() => _pendingPhoto = null);
+    if (photo == null || _sending) return;
+    setState(() => _sending = true);
+    try {
+      await AppStateScope.read(context)
+          .sendImage(widget.conversationId, photo);
+      if (mounted) setState(() => _pendingPhoto = null);
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   void _startRecording() {
@@ -165,14 +193,23 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _sendVoice() {
+  Future<void> _sendVoice() async {
     final int seconds = _recorded.inSeconds < 1 ? 1 : _recorded.inSeconds;
-    AppStateScope.read(context).sendVoice(widget.conversationId, seconds);
-    _recordTimer?.cancel();
-    setState(() {
-      _recording = false;
-      _recorded = Duration.zero;
-    });
+    setState(() => _sending = true);
+    try {
+      await AppStateScope.read(context)
+          .sendVoice(widget.conversationId, seconds);
+      _recordTimer?.cancel();
+      if (!mounted) return;
+      setState(() {
+        _recording = false;
+        _recorded = Duration.zero;
+      });
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   // ── The small extras ──────────────────────────────────────────────────────
@@ -227,10 +264,48 @@ class _ChatScreenState extends State<ChatScreen> {
       helpText: 'What time?',
     );
     if (time == null || !mounted) return;
-    AppStateScope.read(context).proposeSession(
-      widget.conversationId,
-      DateTime(day.year, day.month, day.day, time.hour, time.minute),
+    try {
+      await AppStateScope.read(context).proposeSession(
+        widget.conversationId,
+        DateTime(day.year, day.month, day.day, time.hour, time.minute),
+      );
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    }
+  }
+
+  Future<void> _accept(String id) async {
+    try {
+      await AppStateScope.read(context).acceptConversation(id);
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    }
+  }
+
+  Future<void> _decline(String id) async {
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => const _DeclineChatDialog(),
     );
+    if (reason == null || !mounted) return;
+    try {
+      await AppStateScope.read(context).declineConversation(id, reason: reason);
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    }
+  }
+
+  Future<void> _answerSession(
+    String conversationId,
+    String messageId,
+    SessionState answer,
+  ) async {
+    try {
+      await AppStateScope.read(context)
+          .answerSession(conversationId, messageId, answer);
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    }
   }
 
   void _openPhoto(Uint8List bytes) {
@@ -296,14 +371,6 @@ class _ChatScreenState extends State<ChatScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _toBottom(jump: first));
     }
 
-    final bool typing = state.isTyping(c.id);
-    if (typing != _wasTyping) {
-      _wasTyping = typing;
-      if (typing) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _toBottom(jump: false));
-      }
-    }
-
     return Scaffold(
       backgroundColor: AppColors.paper,
       body: SafeArea(
@@ -315,7 +382,13 @@ class _ChatScreenState extends State<ChatScreen> {
               onBack: () => Navigator.of(context).maybePop(),
               onCall: _startCall,
             ),
-            Expanded(child: _thread(context, c, typing)),
+            Expanded(
+              child: _thread(
+                context,
+                c,
+                state.photoFor(c.counterpartId),
+              ),
+            ),
             _footer(context, state, c),
           ],
         ),
@@ -323,8 +396,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _thread(BuildContext context, Conversation c, bool typing) {
-    if (c.messages.isEmpty && !typing) {
+  Widget _thread(BuildContext context, Conversation c, Uint8List? photo) {
+    if (c.messages.isEmpty) {
       final String first = c.counterpartName.split(' ').first;
       final String empty = switch (c.status) {
         RequestStatus.accepted =>
@@ -338,19 +411,18 @@ class _ChatScreenState extends State<ChatScreen> {
       };
       return _EmptyThread(
         name: c.counterpartName,
-        tint: candidateById(c.counterpartId)?.photoTint,
+        photo: photo,
         subject: c.subject,
         role: c.counterpartRole,
         message: empty,
       );
     }
 
-    // Delivery belongs under the last thing this side actually sent. The answer
-    // is "Seen" once a line from the other side follows it — which is the whole
-    // of read-receipts in a prototype with one other person.
+    // Delivery belongs under the last thing this side actually sent. The server
+    // sets read_by_recipient when the other participant marks the thread read.
     final ChatMessage? lastMine = c.lastMine;
     final bool seen = lastMine != null && c.seen(lastMine);
-    final int count = c.messages.length + (typing ? 1 : 0);
+    final int count = c.messages.length;
 
     return Center(
       child: ConstrainedBox(
@@ -363,12 +435,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           itemCount: count,
           itemBuilder: (BuildContext context, int i) {
-            if (typing && i == c.messages.length) {
-              return _TypingBubble(
-                name: c.counterpartName,
-                tint: candidateById(c.counterpartId)?.photoTint,
-              );
-            }
             final ChatMessage message = c.messages[i];
             final String? delivery = c.status == RequestStatus.accepted &&
                     message == lastMine
@@ -385,15 +451,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: _Bubble(
                   message: message,
                   name: c.counterpartName,
-                  // Whoever the conversation is with, their avatar is drawn from
-                  // the one pool row that knows what they look like.
-                  tint: candidateById(c.counterpartId)?.photoTint,
+                  photo: photo,
                   delivery: delivery,
                   onOpenPhoto: _openPhoto,
                   onAnswerSession: message.id == null
                       ? null
-                      : (SessionState answer) => AppStateScope.read(context)
-                          .answerSession(c.id, message.id!, answer),
+                      : (SessionState answer) =>
+                          _answerSession(c.id, message.id!, answer),
                 ),
               ),
             );
@@ -420,7 +484,7 @@ class _ChatScreenState extends State<ChatScreen> {
               title: 'Waiting for $first to accept',
               body: 'They see the request in their Messages. The chat opens the '
                   'moment they accept it, for both sides — until then it is '
-                  'read-only. Nothing is emailed in this prototype.',
+                  'read-only. Nothing is emailed.',
             )
           : TMInlineNote(
               tone: StatusTone.pending,
@@ -432,13 +496,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   label: 'Accept the request',
                   icon: TMIconName.check,
                   minHeight: Hit.min,
-                  onPressed: () => state.acceptConversation(c.id),
+                  onPressed: () => _accept(c.id),
                 ),
                 TMButton(
                   label: 'Decline',
                   variant: TMButtonVariant.secondary,
                   minHeight: Hit.min,
-                  onPressed: () => state.declineConversation(c.id),
+                  onPressed: () => _decline(c.id),
                 ),
               ],
             ),
@@ -607,7 +671,10 @@ class _ChatScreenState extends State<ChatScreen> {
             label: 'Send',
             icon: TMIconName.arrowRight,
             minHeight: Hit.min,
-            onPressed: _text.text.trim().isEmpty ? null : _sendText,
+            busy: _sending,
+            busyLabel: 'Sending…',
+            onPressed:
+                _sending || _text.text.trim().isEmpty ? null : _sendText,
           ),
         ],
       ),
@@ -679,7 +746,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     Text('Photo ready to send', style: AppType.label),
                     const SizedBox(height: Space.xxs),
                     Text(
-                      'It lives in memory only. Nothing is uploaded.',
+                      'It is uploaded when you send it. The server strips '
+                      'metadata before storing the image.',
                       style: AppType.bodySmall.quieter,
                     ),
                   ],
@@ -697,7 +765,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 label: 'Send photo',
                 icon: TMIconName.arrowRight,
                 minHeight: Hit.min,
-                onPressed: _sendPhoto,
+                busy: _sending,
+                busyLabel: 'Uploading…',
+                onPressed: _sending ? null : _sendPhoto,
               ),
               TMButton(
                 label: 'Cancel',
@@ -766,7 +836,9 @@ class _ChatScreenState extends State<ChatScreen> {
             label: 'Send',
             icon: TMIconName.arrowRight,
             minHeight: Hit.min,
-            onPressed: _sendVoice,
+            busy: _sending,
+            busyLabel: 'Sending…',
+            onPressed: _sending ? null : _sendVoice,
           ),
         ],
       ),
@@ -924,10 +996,11 @@ class _ChatHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Conversation c = conversation;
+    final AppState state = AppStateScope.of(context);
     final bool accepted = c.status == RequestStatus.accepted;
     final bool compact = TMLayout.isCompact(context);
     final PublicPlace? counterpartPlace =
-        candidateById(c.counterpartId)?.publicPlace;
+        state.matchFor(c.counterpartId)?.candidate.publicPlace;
     // On a phone the header earns its height by keeping the call actions and
     // dropping the accepted label; the footer states the status anyway.
 
@@ -955,7 +1028,7 @@ class _ChatHeader extends StatelessWidget {
                 TMAvatar(
                   c.counterpartName,
                   size: 40,
-                  tint: candidateById(c.counterpartId)?.photoTint,
+                  photo: state.photoFor(c.counterpartId),
                 ),
                 const SizedBox(width: Space.md),
                 Expanded(
@@ -1209,14 +1282,14 @@ class _EmptyThread extends StatelessWidget {
     required this.subject,
     required this.role,
     required this.message,
-    this.tint,
+    this.photo,
   });
 
   final String name;
   final String subject;
   final Role role;
   final String message;
-  final Color? tint;
+  final Uint8List? photo;
 
   @override
   Widget build(BuildContext context) {
@@ -1231,7 +1304,7 @@ class _EmptyThread extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              TMAvatar(name, size: 64, tint: tint),
+              TMAvatar(name, size: 64, photo: photo),
               const SizedBox(height: Space.lg),
               Text(
                 name,
@@ -1284,7 +1357,7 @@ class _Bubble extends StatelessWidget {
   const _Bubble({
     required this.message,
     required this.name,
-    this.tint,
+    this.photo,
     this.delivery,
     this.onOpenPhoto,
     this.onAnswerSession,
@@ -1293,8 +1366,8 @@ class _Bubble extends StatelessWidget {
   final ChatMessage message;
   final String name;
 
-  /// The counterpart's stand-in for a picture, when they have one.
-  final Color? tint;
+  /// The counterpart's picture, when the API has one and it has loaded.
+  final Uint8List? photo;
 
   /// `Sent` or `Seen`, and only under the last line this side sent.
   final String? delivery;
@@ -1355,7 +1428,7 @@ class _Bubble extends StatelessWidget {
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.only(top: Space.xs),
-          child: TMAvatar(name, size: 28, tint: tint),
+          child: TMAvatar(name, size: 28, photo: photo),
         ),
         const SizedBox(width: Space.sm),
         Flexible(
@@ -1731,98 +1804,68 @@ class _CallLine extends StatelessWidget {
   }
 }
 
-/// Three dots while the scripted answer is being composed. The only other
-/// looping animation in the product, and like the progress rule it exists
-/// because "they are writing" has no static shape.
-class _TypingBubble extends StatefulWidget {
-  const _TypingBubble({required this.name, this.tint});
-
-  final String name;
-  final Color? tint;
+class _DeclineChatDialog extends StatefulWidget {
+  const _DeclineChatDialog();
 
   @override
-  State<_TypingBubble> createState() => _TypingBubbleState();
+  State<_DeclineChatDialog> createState() => _DeclineChatDialogState();
 }
 
-class _TypingBubbleState extends State<_TypingBubble>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _dots = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
+class _DeclineChatDialogState extends State<_DeclineChatDialog> {
+  final TextEditingController _reason = TextEditingController(
+    text: 'Not the right fit right now.',
   );
-  bool _started = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_started) return;
-    _started = true;
-    if (!Motion.reduced(context)) _dots.repeat();
-  }
 
   @override
   void dispose() {
-    _dots.dispose();
+    _reason.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool still = Motion.reduced(context);
-    return Semantics(
-      label: '${widget.name} is typing',
-      child: ExcludeSemantics(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.only(top: Space.xs),
-              child: TMAvatar(widget.name, size: 28, tint: widget.tint),
+    return AlertDialog(
+      backgroundColor: AppColors.paperRaised,
+      title: const Text('Decline this request?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            'The other person sees your reason in the closed thread. They can '
+            'send a new request later.',
+            style: AppType.bodySmall.quieter,
+          ),
+          const SizedBox(height: Space.lg),
+          TextField(
+            controller: _reason,
+            autofocus: true,
+            maxLength: 500,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              labelText: 'Reason',
+              border: OutlineInputBorder(),
             ),
-            const SizedBox(width: Space.sm),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: Space.lg,
-                vertical: Space.md,
-              ),
-              decoration: BoxDecoration(
-                color: AppColors.paperRaised,
-                border: Border.all(color: AppColors.rule),
-                borderRadius: _bubbleRadius(false),
-              ),
-              child: AnimatedBuilder(
-                animation: _dots,
-                builder: (BuildContext context, Widget? child) => Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    for (int i = 0; i < 3; i++)
-                      Padding(
-                        padding: EdgeInsets.only(left: i == 0 ? 0 : Space.xs),
-                        child: Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: AppColors.inkMuted.withValues(
-                              alpha: still ? 0.55 : 0.25 + 0.75 * _pulse(i),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Keep it open'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final String reason = _reason.text.trim();
+            Navigator.of(context).pop(
+              reason.isEmpty ? 'Not the right fit right now.' : reason,
+            );
+          },
+          child: const Text('Decline'),
+        ),
+      ],
     );
-  }
-
-  /// A triangular wave rather than a sine: same read, no import needed.
-  double _pulse(int i) {
-    final double t = (_dots.value + i * 0.2) % 1;
-    return t < 0.5 ? t * 2 : (1 - t) * 2;
   }
 }
 

@@ -150,6 +150,16 @@ class ProfileService:
             raise PhotoNotFound()
         return photo
 
+    def get_stored(self, user: User) -> Profile:
+        """The stored profile, or a non-persisted default for a new account.
+
+        Matching needs the internal shape, not the editable API view. The
+        default is deliberately not added to the repository: reading matches
+        must not create a profile as a side effect.
+        """
+
+        return self._profile_or_default(user)
+
     def public_profile(
         self,
         viewer: User,
@@ -159,8 +169,26 @@ class ProfileService:
         if target is None:
             raise UserNotFound()
 
-        target_profile = self._profile_or_default(target)
-        viewer_profile = self._profile_or_default(viewer)
+        return self.public_profile_for(
+            target=target,
+            target_profile=self._profile_or_default(target),
+            viewer_profile=self._profile_or_default(viewer),
+        )
+
+    def public_profile_for(
+        self,
+        *,
+        target: User,
+        target_profile: Profile,
+        viewer_profile: Profile,
+    ) -> PublicProfile:
+        """Build a public view from already-loaded profiles.
+
+        Batch callers such as matching already hold the user and profile rows;
+        this avoids a second repository round trip while keeping the privacy
+        projection in one place.
+        """
+
         public_location = self._public_location(target_profile)
         viewer_location = self._public_location(viewer_profile)
         distance_km, distance_text = self._distance(

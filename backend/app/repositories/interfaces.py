@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from ..models.auth import RefreshToken
+from ..models.chat import Conversation
 from ..models.profile import Profile
 from ..models.user import User
 
@@ -90,6 +91,40 @@ class RefreshTokenRepository(ABC):
 
     @abstractmethod
     def list_all(self) -> list[RefreshToken]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def export_state(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def import_state(self, state: list[dict[str, Any]]) -> None:
+        raise NotImplementedError
+
+
+class ConversationRepository(ABC):
+    @abstractmethod
+    def get_by_id(self, conversation_id: str) -> Conversation | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_between(
+        self,
+        first_user_id: str,
+        second_user_id: str,
+    ) -> Conversation | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def add(self, conversation: Conversation) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update(self, conversation: Conversation) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_all(self) -> list[Conversation]:
         raise NotImplementedError
 
     @abstractmethod

@@ -3,7 +3,7 @@
 //
 // The honest version of a preview: not a mock-up and not a screenshot with the
 // wrong name on it, but the same [PersonSummary] block the match page draws,
-// reading your profile through [profileAsCandidate]. If the two ever disagree
+// reading your profile through [candidateFromProfile]. If the two ever disagree
 // it is because one of them changed and the other did not — and sharing the
 // widget is what stops that happening.
 //
@@ -17,7 +17,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -45,7 +45,7 @@ class _ProfilePreviewScreenState extends State<ProfilePreviewScreen> {
   Widget build(BuildContext context) {
     final AppState state = AppStateScope.of(context);
     final Profile p = state.profile;
-    final Candidate me = profileAsCandidate(p);
+    final Candidate me = state.candidateForProfile(p);
     final String other = p.role == Role.student ? 'a tutor' : 'a student';
     final bool compact = TMLayout.isCompact(context);
     final bool roomy = TMLayout.isRoomy(context);

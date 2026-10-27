@@ -1,0 +1,281 @@
+{
+  "viewers": [
+    {
+      "id": "eval-student-calculus",
+      "role": "student",
+      "name": "Maya Evaluation",
+      "subjects": ["Calculus", "Physics"],
+      "style_index": 0,
+      "mode": "both",
+      "budget": 50,
+      "availability": ["Mon-Eve", "Tue-Eve", "Thu-Eve", "Sat-Morn"],
+      "goal": "Move up a grade or two this year",
+      "area_id": "london-highbury"
+    },
+    {
+      "id": "eval-student-humanities",
+      "role": "student",
+      "name": "Priya Evaluation",
+      "subjects": ["English Literature", "History"],
+      "style_index": 2,
+      "mode": "online",
+      "budget": 40,
+      "availability": ["Tue-Aft", "Wed-Eve", "Sun-Aft"],
+      "goal": "Understand the subject properly, not just pass it",
+      "area_id": "manchester-didsbury"
+    },
+    {
+      "id": "eval-student-stem",
+      "role": "student",
+      "name": "Leo Evaluation",
+      "subjects": ["Chemistry", "Biology", "Statistics"],
+      "style_index": 3,
+      "mode": "in_person",
+      "budget": 45,
+      "availability": ["Mon-Morn", "Wed-Aft", "Fri-Eve", "Sat-Morn"],
+      "goal": "Catch up on foundations I missed earlier",
+      "area_id": "leeds-hyde-park"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "eval-tutor-01",
+      "role": "tutor",
+      "name": "Amara Okonkwo",
+      "subjects": ["Calculus", "Physics", "Algebra"],
+      "style_index": 0,
+      "mode": "both",
+      "budget": 46,
+      "availability": ["Mon-Eve", "Tue-Eve", "Thu-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "london-highbury"
+    },
+    {
+      "id": "eval-tutor-02",
+      "role": "tutor",
+      "name": "Liang Chen",
+      "subjects": ["Calculus", "Physics", "Statistics"],
+      "style_index": 1,
+      "mode": "online",
+      "budget": 48,
+      "availability": ["Mon-Eve", "Tue-Eve", "Fri-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "london-camden"
+    },
+    {
+      "id": "eval-tutor-03",
+      "role": "tutor",
+      "name": "Hana Suzuki",
+      "subjects": ["Physics", "Chemistry", "Biology"],
+      "style_index": 0,
+      "mode": "both",
+      "budget": 47,
+      "availability": ["Mon-Eve", "Tue-Eve", "Thu-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "manchester-northern-quarter"
+    },
+    {
+      "id": "eval-tutor-04",
+      "role": "tutor",
+      "name": "Rachel Osei",
+      "subjects": ["English Literature", "History", "Essay Writing"],
+      "style_index": 2,
+      "mode": "online",
+      "budget": 35,
+      "availability": ["Tue-Aft", "Wed-Eve", "Sun-Aft", "Mon-Eve"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "manchester-didsbury"
+    },
+    {
+      "id": "eval-tutor-05",
+      "role": "tutor",
+      "name": "Marcus Bell",
+      "subjects": ["English Literature", "History", "Spanish"],
+      "style_index": 1,
+      "mode": "both",
+      "budget": 38,
+      "availability": ["Tue-Aft", "Wed-Eve", "Sun-Aft", "Thu-Eve"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "london-hackney"
+    },
+    {
+      "id": "eval-tutor-06",
+      "role": "tutor",
+      "name": "Greta Lindqvist",
+      "subjects": ["History", "Essay Writing"],
+      "style_index": 2,
+      "mode": "online",
+      "budget": 38,
+      "availability": ["Tue-Aft", "Wed-Eve", "Sun-Aft", "Fri-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "edinburgh-leith"
+    },
+    {
+      "id": "eval-tutor-07",
+      "role": "tutor",
+      "name": "Samir Haddad",
+      "subjects": ["Chemistry", "Biology", "Statistics"],
+      "style_index": 3,
+      "mode": "in_person",
+      "budget": 45,
+      "availability": ["Mon-Morn", "Wed-Aft", "Fri-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "leeds-hyde-park"
+    },
+    {
+      "id": "eval-tutor-08",
+      "role": "tutor",
+      "name": "Evelyn Marsh",
+      "subjects": ["Chemistry", "Biology", "Statistics", "Algebra"],
+      "style_index": 3,
+      "mode": "both",
+      "budget": 40,
+      "availability": ["Mon-Morn", "Wed-Aft", "Fri-Eve"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "bristol-clifton"
+    },
+    {
+      "id": "eval-tutor-09",
+      "role": "tutor",
+      "name": "Nadia Rahman",
+      "subjects": ["Statistics", "Computer Science", "Calculus"],
+      "style_index": 3,
+      "mode": "in_person",
+      "budget": 38,
+      "availability": ["Mon-Morn", "Fri-Eve", "Sat-Morn", "Sun-Aft"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "leeds-hyde-park"
+    },
+    {
+      "id": "eval-tutor-10",
+      "role": "tutor",
+      "name": "Theo Bennett",
+      "subjects": ["Calculus", "Physics", "Chemistry"],
+      "style_index": 1,
+      "mode": "both",
+      "budget": 45,
+      "availability": ["Mon-Eve", "Tue-Eve", "Thu-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "london-islington"
+    },
+    {
+      "id": "eval-tutor-11",
+      "role": "tutor",
+      "name": "Ines Duarte",
+      "subjects": ["English Literature", "History", "Biology"],
+      "style_index": 2,
+      "mode": "online",
+      "budget": 36,
+      "availability": ["Tue-Aft", "Wed-Eve", "Sun-Aft", "Fri-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "manchester-didsbury"
+    },
+    {
+      "id": "eval-tutor-12",
+      "role": "tutor",
+      "name": "Omar Haddad",
+      "subjects": ["Chemistry", "Biology", "Statistics"],
+      "style_index": 2,
+      "mode": "in_person",
+      "budget": 42,
+      "availability": ["Mon-Morn", "Wed-Aft", "Fri-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "leeds-hyde-park"
+    },
+    {
+      "id": "eval-tutor-13",
+      "role": "tutor",
+      "name": "Sofia Rossi",
+      "subjects": ["Calculus", "Physics"],
+      "style_index": 0,
+      "mode": "both",
+      "budget": 50,
+      "availability": ["Mon-Eve", "Wed-Eve", "Fri-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "london-highbury"
+    },
+    {
+      "id": "eval-tutor-14",
+      "role": "tutor",
+      "name": "Ben Whitaker",
+      "subjects": ["Calculus", "Physics", "English Literature"],
+      "style_index": 4,
+      "mode": "online",
+      "budget": 50,
+      "availability": ["Mon-Eve", "Thu-Eve"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "london-camden"
+    },
+    {
+      "id": "eval-tutor-15",
+      "role": "tutor",
+      "name": "Zara Okafor",
+      "subjects": ["English Literature", "History"],
+      "style_index": 4,
+      "mode": "both",
+      "budget": 40,
+      "availability": ["Tue-Aft", "Wed-Eve"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "manchester-didsbury"
+    },
+    {
+      "id": "eval-tutor-16",
+      "role": "tutor",
+      "name": "Daniel Kim",
+      "subjects": ["English Literature", "History", "Chemistry"],
+      "style_index": 2,
+      "mode": "both",
+      "budget": 37,
+      "availability": ["Tue-Aft", "Wed-Eve", "Sun-Aft"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "manchester-didsbury"
+    },
+    {
+      "id": "eval-tutor-17",
+      "role": "tutor",
+      "name": "Aisha Rahman",
+      "subjects": ["Chemistry", "Biology", "Statistics"],
+      "style_index": 3,
+      "mode": "in_person",
+      "budget": 44,
+      "availability": ["Mon-Morn", "Wed-Aft", "Fri-Eve", "Sat-Morn"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "leeds-hyde-park"
+    },
+    {
+      "id": "eval-tutor-18",
+      "role": "tutor",
+      "name": "Lucas Meyer",
+      "subjects": ["Chemistry", "Biology", "Statistics", "Physics"],
+      "style_index": 0,
+      "mode": "both",
+      "budget": 43,
+      "availability": ["Mon-Morn", "Wed-Aft"],
+      "goal": "Fill a few steady evenings a week",
+      "area_id": "leeds-hyde-park"
+    }
+  ],
+  "labels": {
+    "eval-student-calculus": [
+      "eval-tutor-01",
+      "eval-tutor-02",
+      "eval-tutor-10",
+      "eval-tutor-13",
+      "eval-tutor-14"
+    ],
+    "eval-student-humanities": [
+      "eval-tutor-04",
+      "eval-tutor-05",
+      "eval-tutor-11",
+      "eval-tutor-15",
+      "eval-tutor-16"
+    ],
+    "eval-student-stem": [
+      "eval-tutor-07",
+      "eval-tutor-08",
+      "eval-tutor-12",
+      "eval-tutor-17",
+      "eval-tutor-18"
+    ]
+  }
+}

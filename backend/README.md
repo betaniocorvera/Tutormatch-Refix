@@ -6,11 +6,20 @@ Phase 1 provides the auth foundation: registration, login, JWT access and
 rotating refresh tokens, logout, and a private `/auth/me` view. Phase 2 adds the
 real profile: structured areas, subjects, availability, privacy-safe public
 profiles, server-derived age/location/distance/completeness, and validated photo
-uploads.
+uploads. Phase 3 adds the real match list: hard eligibility filters, the five
+weighted groups from the Flutter prototype, KNN ranking, tiers, three reasons,
+cold-start handling, and a labelled precision@5 evaluation. Phase 4 adds lesson
+requests and accepted-only conversations: paginated messages, validated image and
+voice uploads, read receipts and unread counts, session proposals, simulated call
+events, WebSocket push, and a polling fallback. Phase 5 connects the Flutter
+client to this API: repository-backed state, real auth restore and 401 logout,
+profile and photo flows, server-side match filters, requests, polling chat, and
+the Flutter web development CORS origin.
 
 Data lives in memory. Set `PERSIST_TO_FILE=true` to keep a debounced, atomic JSON
-snapshot at `data/store.json`; that snapshot includes users, profiles, and refresh
-sessions. Without persistence, all data resets on restart.
+snapshot at `data/store.json`; that snapshot includes users, profiles, refresh
+sessions, requests, conversations, messages, events, and read cursors. Without
+persistence, all data resets on restart.
 
 ## Setup (Windows PowerShell)
 
@@ -35,10 +44,36 @@ without a real secret.
 
 Open http://127.0.0.1:8000/docs for the generated API docs.
 
+## Flutter web client
+
+From the repository root:
+
+```powershell
+flutter run -d chrome --web-hostname=localhost --web-port=8080 `
+  --dart-define=API_BASE_URL=http://127.0.0.1:8000
+```
+
+The client stores the token pair in `shared_preferences`, restores a session on
+reload, refreshes once on a 401, and signs out when refresh fails. Chat uses
+authenticated REST sends and five-second polling; it does not require a
+WebSocket dependency.
+
+CORS is allow-list based. The default `CORS_ORIGINS` is
+`http://localhost:8080`; configure a comma-separated list of `http`/`https`
+origins to allow another development host. Trailing slashes and non-HTTP origins
+are rejected. The Flutter origin and API origin are different in development, so
+the browser must be opened at the exact allowed origin.
+
 ## Test
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
+```
+
+The matching evaluation is included in the suite. Run just that check with:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_matching_evaluation.py -q
 ```
 
 ## Auth endpoints
@@ -96,6 +131,81 @@ profile exposes the neighbourhood centre, and `hidden` exposes no location.
 Distance is computed only when both the viewer and target have a visible public
 location; otherwise `distance_km` is `null`.
 
+## Match endpoint
+
+`GET /matches` requires a bearer access token. It returns the ranked,
+privacy-safe match list for the signed-in user, with the same five weighted
+dimensions as the Flutter prototype:
+
+- subjects 40
+- available time 25
+- style 15
+- format 10
+- budget 10
+
+Hard eligibility (opposite role, not yourself, completed matching answers) is
+applied before KNN. Query filters narrow the list without reordering it:
+
+- `subjects` (repeated canonical subject name or id)
+- `mode` (`online`, `in_person`, or `both`)
+- `max_rate`
+- `required_parts` (repeated 0, 1, or 2 for mornings, afternoons, evenings)
+- `must_be_free_when_i_am`
+- `max_distance_km`
+- `min_score`
+- `limit` (default 20, maximum 100)
+
+The response includes `pool_size`, `ranked_count`, `returned`, and a
+`cold_start` object when the viewer has not completed the matching answers or
+there are no eligible counterparts. Each match carries a nested `PublicProfile`,
+integer score, tier label, dimension breakdown, 21-cell overlap grid, and three
+reasons. A hidden location never produces a distance or a nearby reason.
+
+See [MATCHING.md](MATCHING.md) for the formulas, KNN embedding, tier thresholds,
+reason selection, privacy rules, cold-start contract, and the labelled
+precision@5 evaluation.
+
+## Requests and chat
+
+All request and conversation endpoints require a bearer access token.
+
+- `POST /requests` — `{counterpart_id, subject, note}`
+- `GET /requests` — your requests; optional `direction` and `status`
+- `GET /requests/{id}` — one request
+- `POST /requests/{id}/accept` — receiver accepts; optional `{note}`
+- `POST /requests/{id}/decline` — receiver declines; required `{reason}`
+- `GET /conversations` — your inbox
+- `GET /conversations/{id}` — detail and read cursor
+- `GET /conversations/{id}/messages` — `limit`, `before`, or `after`
+- `POST /conversations/{id}/messages` — `{text}`
+- `POST /conversations/{id}/messages/image` — multipart `file`
+- `POST /conversations/{id}/messages/voice` — multipart `file` + `duration_seconds`
+- `POST /conversations/{id}/messages/voice-note` — simulated `{duration_seconds}`
+- `GET /conversations/{id}/messages/{message_id}/media` — private attachment bytes
+- `POST /conversations/{id}/sessions` — `{proposed_for}`
+- `POST /conversations/{id}/sessions/{message_id}/respond` — `{state}`
+- `POST /conversations/{id}/calls` — `{kind, connected, duration_seconds}`
+- `POST /conversations/{id}/read` — optional `{through_sequence}`
+- `GET /conversations/{id}/events` — polling and catch-up
+- `WS /ws/conversations/{id}?token=...&after=...` — push channel
+
+A request is also its conversation: the initial note is the first message, and
+there is exactly one conversation per pair. Both profiles must have completed
+matching answers, the subject must be shared, and only the receiver can answer.
+The chat is read-only until the request is accepted. Declining stores a reason;
+a declined request can be re-requested and keeps its thread.
+
+Messages use per-conversation sequences. `before` pages backwards through
+history; `after` polls forwards. Text is trimmed and limited to 2000 characters.
+Images are re-encoded through the same metadata-stripping pipeline as profile
+photos. Voice notes are limited to 10 MB and 1–300 seconds and require a known
+audio container. Read receipts are stored as a per-person cursor, and each
+conversation summary reports its unread count.
+
+See [CHAT.md](CHAT.md) for the full lifecycle, access-control rules, event
+contract, WebSocket close codes, media limits, pagination, session/call payloads,
+and Phase 5 client notes.
+
 ## Static catalogues
 
 Areas, subjects, and profile answer sets are loaded from backend data files, not
@@ -123,8 +233,12 @@ Photo bytes live behind a `PhotoStorage` interface. With
 `data/uploads`) and survive a restart. Files are named from a hash of the user id,
 and the directory is gitignored.
 
-`data/store.json` contains password hashes and refresh sessions, so it is also
-gitignored. Never commit either data directory.
+Chat images and uploaded voice notes use a separate `ChatMediaStorage` interface.
+With persistence enabled they live under `UPLOAD_DIR/chat`, also under hashed
+filenames. Chat media is private to the two participants; there is no public URL.
+
+`data/store.json` contains password hashes, refresh sessions, and conversation
+history, so it is also gitignored. Never commit either data directory.
 
 ## Other
 

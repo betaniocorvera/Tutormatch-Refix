@@ -12,7 +12,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 
 /// The compact linear reading. Kept for any caller that needs a score in one

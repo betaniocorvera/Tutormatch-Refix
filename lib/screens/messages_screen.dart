@@ -7,13 +7,14 @@
 // conversation list: one surface, hairline rows, and the latest line from the
 // other side marked with a single green dot.
 //
-// Reading is local presentation only. The conversation model has no read flag,
-// so "unread" means "their last message is still the newest thing here and this
-// session has not opened it". Opening, accepting or declining clears the dot.
+// Unread comes from the server's per-participant read cursor. Opening a thread
+// marks it read through the latest message, and the next list refresh carries
+// the new count.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -33,31 +34,37 @@ class MessagesScreen extends StatefulWidget {
 }
 
 class _MessagesScreenState extends State<MessagesScreen> {
-  /// Conversations opened in this session. Presentation only — nothing is
-  /// written back to the model, and a reload begins with the same dots.
-  final Set<String> _opened = <String>{};
-
-  bool _unread(Conversation c) {
-    final ChatMessage? last = c.lastMessage;
-    return last != null &&
-        !last.fromMe &&
-        c.status != RequestStatus.declined &&
-        !_opened.contains(c.id);
-  }
+  bool _unread(Conversation c) => c.unreadCount > 0;
 
   void _open(Conversation c) {
-    setState(() => _opened.add(c.id));
     Navigator.of(context).pushNamed(Routes.chat, arguments: c.id);
   }
 
-  void _accept(AppState state, Conversation c) {
-    setState(() => _opened.add(c.id));
-    state.acceptConversation(c.id);
+  Future<void> _accept(AppState state, Conversation c) async {
+    try {
+      await state.acceptConversation(c.id);
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    }
   }
 
-  void _decline(AppState state, Conversation c) {
-    setState(() => _opened.add(c.id));
-    state.declineConversation(c.id);
+  Future<void> _decline(AppState state, Conversation c) async {
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => const _DeclineDialog(),
+    );
+    if (reason == null || !mounted) return;
+    try {
+      await state.declineConversation(c.id, reason: reason);
+    } on ApiException catch (error) {
+      if (mounted) _say(error.message);
+    }
+  }
+
+  void _say(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -120,7 +127,19 @@ class _MessagesScreenState extends State<MessagesScreen> {
             closed: count(RequestStatus.declined),
           ),
           const SizedBox(height: Space.xxl),
-          if (chats.isEmpty)
+          if (state.conversationsLoading && chats.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: Space.huge),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (state.conversationsError != null && chats.isEmpty)
+            TMEmptyState(
+              headline: 'Messages could not load.',
+              body: state.conversationsError!,
+              primaryLabel: 'Try again',
+              onPrimary: state.loadConversations,
+            )
+          else if (chats.isEmpty)
             TMEmptyState(
               headline: 'No conversations yet.',
               body: student
@@ -279,7 +298,7 @@ class _InboxHeading extends StatelessWidget {
         ),
         const SizedBox(height: Space.sm),
         Text(
-          '$total in this prototype',
+          '$total in your account',
           style: AppType.micro.tone(AppColors.inkMuted),
         ),
       ],
@@ -940,7 +959,7 @@ class _PersonMark extends StatelessWidget {
         TMAvatar(
           name,
           size: size,
-          tint: candidateById(id)?.photoTint,
+          photo: AppStateScope.of(context).photoFor(id),
         ),
         if (unread)
           Positioned(
@@ -948,6 +967,71 @@ class _PersonMark extends StatelessWidget {
             top: -2,
             child: _UnreadDot(size: 11),
           ),
+      ],
+    );
+  }
+}
+
+class _DeclineDialog extends StatefulWidget {
+  const _DeclineDialog();
+
+  @override
+  State<_DeclineDialog> createState() => _DeclineDialogState();
+}
+
+class _DeclineDialogState extends State<_DeclineDialog> {
+  final TextEditingController _reason = TextEditingController(
+    text: 'Not the right fit right now.',
+  );
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.paperRaised,
+      title: const Text('Decline this request?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            'The other person sees your reason in the closed thread. They can '
+            'send a new request later.',
+            style: AppType.bodySmall.quieter,
+          ),
+          const SizedBox(height: Space.lg),
+          TextField(
+            controller: _reason,
+            autofocus: true,
+            maxLength: 500,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              labelText: 'Reason',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Keep it open'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final String reason = _reason.text.trim();
+            Navigator.of(context).pop(
+              reason.isEmpty ? 'Not the right fit right now.' : reason,
+            );
+          },
+          child: const Text('Decline'),
+        ),
       ],
     );
   }

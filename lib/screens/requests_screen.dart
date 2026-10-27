@@ -10,8 +10,10 @@
 // should not treat it as a failure state to be hidden.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -36,13 +38,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   @override
   Widget build(BuildContext context) {
     final AppState state = AppStateScope.of(context);
-    final bool student = state.role == Role.student;
-
-    // A student reads the requests they sent; a tutor reads the ones students
-    // sent them. Two static inboxes, one screen, because the tabs below are
-    // states rather than directions.
-    final List<MatchRequest> inbox =
-        student ? sampleRequests : sampleReceivedRequests;
+    final List<MatchRequest> inbox = state.requests;
 
     int count(RequestStatus status) =>
         inbox.where((MatchRequest r) => r.status == status).length;
@@ -78,24 +74,16 @@ class _RequestsScreenState extends State<RequestsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            student ? 'Requests you have sent' : 'Requests you have received',
-            style: AppType.pageTitle,
-          ),
+          Text('Your requests', style: AppType.pageTitle),
           const SizedBox(height: Space.lg),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 620),
             child: Text(
-              student
-                  ? '${inbox.length} requests in this prototype: '
-                      '${count(RequestStatus.pending)} still waiting, '
-                      '${count(RequestStatus.accepted)} accepted, '
-                      '${count(RequestStatus.declined)} rejected. Nothing here was '
-                      'emailed anywhere.'
-                  : 'Requests students have sent you. ${inbox.length} in this '
-                      'prototype: ${count(RequestStatus.pending)} waiting on your '
-                      'answer, ${count(RequestStatus.accepted)} accepted, '
-                      '${count(RequestStatus.declined)} turned down.',
+              '${inbox.length} requests: ${count(RequestStatus.pending)} waiting, '
+              '${count(RequestStatus.accepted)} accepted, '
+              '${count(RequestStatus.declined)} declined. Requests you sent and '
+              'requests you received share this list; the quoted note says who '
+              'wrote it.',
               style: AppType.bodyLarge.quiet,
             ),
           ),
@@ -143,28 +131,53 @@ class _RequestsScreenState extends State<RequestsScreen> {
               },
               child: KeyedSubtree(
                 key: ValueKey<RequestStatus>(_tab),
-                child: shown.isEmpty
-                    ? _emptyFor(_tab, student)
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          for (int i = 0; i < shown.length; i++) ...<Widget>[
-                            if (i > 0) const SizedBox(height: Space.lg),
-                            TMReveal(
-                              key: ValueKey<String>(
-                                'request-${shown[i].id}',
+                child: state.requestsLoading && inbox.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: Space.huge),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : state.requestsError != null && inbox.isEmpty
+                        ? TMEmptyState(
+                            headline: 'Requests could not load.',
+                            body: state.requestsError!,
+                            primaryLabel: 'Try again',
+                            onPrimary: state.loadRequests,
+                          )
+                        : shown.isEmpty
+                            ? _emptyFor(_tab, state.role == Role.student)
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: <Widget>[
+                                  for (int i = 0; i < shown.length; i++)
+                                    ...<Widget>[
+                                      if (i > 0)
+                                        const SizedBox(height: Space.lg),
+                                      TMReveal(
+                                        key: ValueKey<String>(
+                                          'request-${shown[i].id}',
+                                        ),
+                                        delay: Motion.stagger *
+                                            (i < 5 ? i : 5),
+                                        child: _RequestEntry(
+                                          request: shown[i],
+                                          photo: state
+                                              .photoFor(shown[i].counterpartId),
+                                          onOpenProfile: () => _openProfile(
+                                            context,
+                                            state,
+                                            shown[i],
+                                          ),
+                                          onOpenConversation: () =>
+                                              Navigator.of(context).pushNamed(
+                                            Routes.chat,
+                                            arguments:
+                                                shown[i].conversationId,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                ],
                               ),
-                              delay: Motion.stagger * (i < 5 ? i : 5),
-                              child: _RequestEntry(
-                                request: shown[i],
-                                student: student,
-                                onOpenProfile: () =>
-                                    _openProfile(context, state, shown[i]),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
               ),
             ),
           ),
@@ -178,12 +191,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
   /// that produced it. If they are not in the pool, the entry stays readable and
   /// simply has no link — better than a dead one.
   void _openProfile(BuildContext context, AppState state, MatchRequest request) {
-    final List<MatchResult> ranked = rank(state.pool, state.profile);
-    final Iterable<MatchResult> hit = ranked.where(
-      (MatchResult r) => r.candidate.id == request.counterpartId,
-    );
-    if (hit.isEmpty) return;
-    Navigator.of(context).pushNamed(Routes.matchDetail, arguments: hit.first);
+    final MatchResult? hit = state.matchFor(request.counterpartId);
+    if (hit == null) return;
+    Navigator.of(context).pushNamed(Routes.matchDetail, arguments: hit);
   }
 
   Widget _emptyFor(RequestStatus tab, bool student) {
@@ -192,9 +202,8 @@ class _RequestsScreenState extends State<RequestsScreen> {
           ? (
               'Nothing is waiting on an answer.',
               'Requests you send from a match appear here and stay here until the '
-                  'other side accepts or declines. In this prototype nothing is '
-                  'actually sent, so send one from any match and it will show up '
-                  'immediately.',
+                  'other side accepts or declines. Sending one creates the '
+                  'conversation immediately; it stays read-only until they answer.',
             )
           : (
               'Nothing is waiting on your answer.',
@@ -361,13 +370,15 @@ class _Tab extends StatelessWidget {
 class _RequestEntry extends StatelessWidget {
   const _RequestEntry({
     required this.request,
-    required this.student,
+    required this.photo,
     required this.onOpenProfile,
+    required this.onOpenConversation,
   });
 
   final MatchRequest request;
-  final bool student;
+  final Uint8List? photo;
   final VoidCallback onOpenProfile;
+  final VoidCallback onOpenConversation;
 
   @override
   Widget build(BuildContext context) {
@@ -382,7 +393,7 @@ class _RequestEntry extends StatelessWidget {
               TMAvatar(
                 request.counterpartName,
                 size: 44,
-                tint: candidateById(request.counterpartId)?.photoTint,
+                photo: photo,
               ),
               const SizedBox(width: Space.lg),
               Expanded(
@@ -400,7 +411,7 @@ class _RequestEntry extends StatelessWidget {
                         // request, not with the name: on a phone it was the
                         // thing that pushed a two-word name onto two lines.
                         Text(
-                          request.id,
+                          request.reference,
                           style: AppType.micro.tone(AppColors.inkMuted),
                         ),
                         Text(request.subject, style: AppType.bodySmall.tone(AppColors.inkSecondary)),
@@ -417,14 +428,18 @@ class _RequestEntry extends StatelessWidget {
           ),
           const SizedBox(height: Space.lg),
           _Said(
-            attribution: student ? 'You wrote' : 'They wrote',
+            attribution: request.outgoing
+                ? 'You wrote'
+                : '${request.counterpartName.split(' ').first} wrote',
             text: request.note,
             tone: StatusTone.neutral,
           ),
           if (request.reply != null) ...<Widget>[
             const SizedBox(height: Space.md),
             _Said(
-              attribution: student ? '${request.counterpartName.split(' ').first} replied' : 'You replied',
+              attribution: request.outgoing
+                  ? '${request.counterpartName.split(' ').first} replied'
+                  : 'You replied',
               text: request.reply!,
               tone: request.status.tone,
             ),
@@ -444,18 +459,22 @@ class _RequestEntry extends StatelessWidget {
                 minHeight: Hit.min,
                 onPressed: onOpenProfile,
               ),
-              if (request.status == RequestStatus.pending)
-                student
-                    ? TMTextLink(
-                        label: 'Withdraw the request',
-                        style: AppType.bodySmall,
-                        onTap: () => _explainWithdraw(context),
-                      )
-                    : TMTextLink(
-                        label: 'Accept or decline',
-                        style: AppType.bodySmall,
-                        onTap: () => _explainAnswer(context),
-                      ),
+              TMButton(
+                label: request.status == RequestStatus.accepted
+                    ? 'Open conversation'
+                    : request.outgoing
+                        ? 'Open conversation'
+                        : 'Answer in Messages',
+                variant: TMButtonVariant.quiet,
+                minHeight: Hit.min,
+                onPressed: onOpenConversation,
+              ),
+              if (request.status == RequestStatus.pending && request.outgoing)
+                TMTextLink(
+                  label: 'Withdraw is not available yet',
+                  style: AppType.bodySmall,
+                  onTap: () => _explainWithdraw(context),
+                ),
             ],
           ),
         ],
@@ -463,30 +482,14 @@ class _RequestEntry extends StatelessWidget {
     );
   }
 
-  /// Withdrawing is not implemented, and says so rather than pretending.
+  /// Withdrawing has no endpoint yet, and says so rather than pretending.
   void _explainWithdraw(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: AppColors.ink,
         content: Text(
-          'Withdrawing is not part of this prototype. In the real product it would '
-          'remove the request and free the other person\'s slot.',
-          style: AppType.bodySmall.tone(AppColors.onAccent),
-        ),
-      ),
-    );
-  }
-
-  /// The tutor's side of the same stub. Answering itself lives in Messages now,
-  /// where the live conversation is; this static sample list only says so.
-  void _explainAnswer(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: AppColors.ink,
-        content: Text(
-          'This list is a static sample. Requests with a conversation behind '
-          'them are answered in Messages — Accept and Decline sit on the '
-          'request there, and accepting opens the chat for both sides.',
+          'Withdrawing is not available yet. The request stays in Messages '
+          'until the other person answers it.',
           style: AppType.bodySmall.tone(AppColors.onAccent),
         ),
       ),

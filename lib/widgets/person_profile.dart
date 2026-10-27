@@ -15,7 +15,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/availability_grid.dart';
 import 'package:tutormatch/widgets/location_map.dart';
@@ -281,15 +281,11 @@ class PersonFacts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final DateTime? born = person.birthdate;
     final bool tutor = person.role == Role.tutor;
 
     final List<Widget> facts = <Widget>[
-      if (born != null)
-        _Column(
-          label: 'Age',
-          value: '${ageOn(born, DateTime.now())} years old',
-        ),
+      if (person.age != null)
+        _Column(label: 'Age', value: '${person.age} years old'),
       if (person.publicPlace != null)
         _Column(label: 'Lives in', value: person.publicPlace!.label),
       if (person.gender.trim().isNotEmpty && person.gender != Profile.noAnswer)
@@ -349,7 +345,7 @@ class PersonColumns extends StatelessWidget {
         label: 'Reviews',
         value: candidate.reviews > 0
             ? '${candidate.rating} from ${candidate.reviews}'
-            : 'No reviews yet — newer to the platform',
+            : 'Reviews are not collected yet',
       ),
     ];
 

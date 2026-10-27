@@ -15,7 +15,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/tm_avatar.dart';
@@ -76,18 +77,25 @@ class _CallScreenState extends State<CallScreen> {
     super.dispose();
   }
 
-  void _end() {
+  Future<void> _end() async {
     if (_ended) return;
     _ended = true;
     _connect?.cancel();
     _tick?.cancel();
-    AppStateScope.read(context).logCall(
-      widget.conversationId,
-      video: _video,
-      connected: _connected,
-      duration: Duration(seconds: _seconds),
-    );
-    Navigator.of(context).maybePop();
+    final AppState state = AppStateScope.read(context);
+    final String kind = _video ? 'video' : 'voice';
+    if (mounted) Navigator.of(context).maybePop();
+    try {
+      await state.logCall(
+        widget.conversationId,
+        kind: kind,
+        connected: _connected,
+        durationSeconds: _seconds,
+      );
+    } on ApiException {
+      // The call itself is over; a failed thread entry must not trap the user
+      // on a screen that no longer has a live call.
+    }
   }
 
   @override
@@ -96,9 +104,9 @@ class _CallScreenState extends State<CallScreen> {
     final Conversation? conversation =
         state.conversation(widget.conversationId);
     final String name = conversation?.counterpartName ?? 'This conversation';
-    final Color? tint = conversation == null
+    final Uint8List? photo = conversation == null
         ? null
-        : candidateById(conversation.counterpartId)?.photoTint;
+        : state.photoFor(conversation.counterpartId);
     final String subtitle = conversation == null
         ? ''
         : '${conversation.subject} · '
@@ -124,12 +132,13 @@ class _CallScreenState extends State<CallScreen> {
                   const SizedBox(height: Space.lg),
                   Expanded(
                     child: _video
-                        ? _videoStage(context, state, name, tint, subtitle)
-                        : _voiceStage(name, tint, subtitle),
+                        ? _videoStage(context, state, name, photo, subtitle)
+                        : _voiceStage(name, photo, subtitle),
                   ),
                   const SizedBox(height: Space.lg),
                   Text(
-                    'Simulated call, no real audio or video yet',
+                    'Simulated call. The length is logged in the thread; no '
+                    'audio or video is captured.',
                     textAlign: TextAlign.center,
                     style: AppType.bodySmall.quieter,
                   ),
@@ -184,13 +193,13 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   /// Voice has no picture to show, so the person is the screen.
-  Widget _voiceStage(String name, Color? tint, String subtitle) {
+  Widget _voiceStage(String name, Uint8List? photo, String subtitle) {
     return Center(
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            TMAvatar(name, size: 104, tint: tint),
+            TMAvatar(name, size: 104, photo: photo),
             const SizedBox(height: Space.xl),
             Text(
               name,
@@ -220,7 +229,7 @@ class _CallScreenState extends State<CallScreen> {
     BuildContext context,
     AppState state,
     String name,
-    Color? tint,
+    Uint8List? photo,
     String subtitle,
   ) {
     return Container(
@@ -239,7 +248,7 @@ class _CallScreenState extends State<CallScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  TMAvatar(name, size: 120, tint: tint),
+                  TMAvatar(name, size: 120, photo: photo),
                   const SizedBox(height: Space.xl),
                   Text(
                     name,

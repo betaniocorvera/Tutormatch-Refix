@@ -74,6 +74,7 @@ class Settings:
     snapshot_debounce_seconds: float = 0.5
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 900
+    cors_origins: tuple[str, ...] = ("http://localhost:8080",)
     secret_is_ephemeral: bool = False
 
     def __post_init__(self) -> None:
@@ -95,6 +96,11 @@ class Settings:
             raise ValueError("LOGIN_RATE_LIMIT_WINDOW_SECONDS must be positive")
         if self.snapshot_debounce_seconds < 0:
             raise ValueError("SNAPSHOT_DEBOUNCE_SECONDS cannot be negative")
+        for origin in self.cors_origins:
+            if not origin.startswith(("http://", "https://")):
+                raise ValueError("CORS_ORIGINS entries must be http(s) origins")
+            if origin.endswith("/"):
+                raise ValueError("CORS_ORIGINS entries must not end with /")
 
         secret = self.jwt_secret
         if not secret:
@@ -145,6 +151,16 @@ class Settings:
             if raw_upload_path
             else DEFAULT_UPLOAD_PATH
         )
+        raw_origins = os.getenv("CORS_ORIGINS", "").strip()
+        cors_origins = (
+            tuple(
+                origin.strip()
+                for origin in raw_origins.split(",")
+                if origin.strip()
+            )
+            if raw_origins
+            else ("http://localhost:8080",)
+        )
         return cls(
             app_env=os.getenv("APP_ENV", "development"),
             jwt_secret=os.getenv("JWT_SECRET", ""),
@@ -161,4 +177,5 @@ class Settings:
             login_rate_limit_window_seconds=_env_int(
                 "LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900
             ),
+            cors_origins=cors_origins,
         )

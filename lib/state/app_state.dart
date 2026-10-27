@@ -1,21 +1,28 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// In-memory application state.
+// Application state.
 //
-// This is the ONLY place the UI keeps anything. There is no persistence, no
-// token and no network: reload the page and you are back to the demo profiles
-// at the bottom of mock_data.dart. That is deliberate — it keeps the interface
-// honest about being an interface. Signing in is an in-memory flag for this
-// tab only; it is what the route guard reads and writes.
+// The one object the interface reads. It owns the session, the signed-in
+// profile, the ranked list, requests, conversations, and the catalogues. Every
+// value here comes from the FastAPI service; the screens do not keep a second
+// copy of the data they render.
 //
-// Everything here is a plain ChangeNotifier behind an InheritedNotifier. No
-// state-management package, because the whole surface is one object.
+// The state is deliberately optimistic only for profile edits: a control should
+// move under the finger immediately, and the server's projection replaces the
+// local value when the save returns. Everything else waits for the answer.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/models.dart';
+import 'package:tutormatch/data/repositories/auth_repository.dart';
+import 'package:tutormatch/data/repositories/catalog_repository.dart';
+import 'package:tutormatch/data/repositories/conversation_repository.dart';
+import 'package:tutormatch/data/repositories/match_repository.dart';
+import 'package:tutormatch/data/repositories/profile_repository.dart';
+import 'package:tutormatch/data/repositories/request_repository.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 
 /// The protected page a signed-out visitor asked for before being sent to sign
@@ -28,61 +35,159 @@ class PendingDestination {
 }
 
 class AppState extends ChangeNotifier {
-  /// Which side of the marketplace you are standing on. Set once, by register,
-  /// login or onboarding, and never switched from inside the app: the account
-  /// type chosen when you signed up is the account type. It decides whose list
-  /// you see, never who you are.
-  Role _role = Role.student;
-  Role get role => _role;
-  set role(Role value) {
-    if (value == _role) return;
-    _role = value;
-    // A role switch must not leave the other side's profile behind: a tutor
-    // signing in with a student-shaped profile would see student-only fields
-    // (and another person's saved area). If the profile already belongs to the
-    // chosen side, keep it; otherwise start from that side's demo profile.
-    if (_profile.role != value) {
-      _profile = value == Role.student ? demoStudentProfile : demoTutorProfile;
-    }
-    notifyListeners();
+  AppState({
+    ApiClient? api,
+    bool autoInitialize = true,
+  }) : _api = api ?? ApiClient() {
+    _api.onUnauthorized = _handleUnauthorized;
+    _auth = AuthRepository(_api);
+    _profiles = ProfileRepository(_api);
+    _catalog = CatalogRepository(_api);
+    _matchRepository = MatchRepository(_api);
+    _requestRepository = RequestRepository(_api);
+    _conversationRepository = ConversationRepository(_api);
+    if (autoInitialize) unawaited(initialize());
   }
 
-  Profile _profile = demoStudentProfile;
-  Profile get profile => _profile;
-  set profile(Profile value) {
-    _profile = value;
+  final ApiClient _api;
+  late final AuthRepository _auth;
+  late final ProfileRepository _profiles;
+  late final CatalogRepository _catalog;
+  late final MatchRepository _matchRepository;
+  late final RequestRepository _requestRepository;
+  late final ConversationRepository _conversationRepository;
+
+  // ── Startup ────────────────────────────────────────────────────────────────
+
+  bool _ready = false;
+  bool get isReady => _ready;
+  bool _initializing = false;
+  String? _startupError;
+  String? get startupError => _startupError;
+
+  /// Loads public catalogues first (the landing page can render signed out),
+  /// then restores a stored refresh session. A network failure is reported as a
+  /// startup error but never blocks the public pages.
+  Future<void> initialize() async {
+    if (_initializing || _ready) return;
+    _initializing = true;
     notifyListeners();
+
+    try {
+      await _loadCatalog();
+    } on ApiException catch (error) {
+      _catalogError = error.message;
+    }
+
+    try {
+      final tokens = await _api.readTokens();
+      if (tokens != null) {
+        final UserAccount user = await _auth.me();
+        _user = user;
+        _signedIn = true;
+        _role = user.role;
+        await _loadProfile();
+        _ready = true;
+        notifyListeners();
+        unawaited(loadMatches());
+        unawaited(loadRequests());
+        unawaited(loadConversations());
+        return;
+      }
+    } on ApiException catch (error) {
+      _startupError = error.message;
+      if (error.statusCode == 401) {
+        await _api.clearTokens();
+      }
+    } finally {
+      _ready = true;
+      _initializing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> retryInitialize() async {
+    _ready = false;
+    _startupError = null;
+    await initialize();
+  }
+
+  // ── Catalogues ─────────────────────────────────────────────────────────────
+
+  List<City> _cities = const <City>[];
+  List<Place> _places = const <Place>[];
+  List<String> _regions = const <String>[];
+  List<SubjectOption> _subjectOptions = const <SubjectOption>[];
+  String? _catalogError;
+
+  List<City> get cities => _cities;
+  List<Place> get places => _places;
+  List<String> get regions => _regions;
+  List<SubjectOption> get subjectOptions => _subjectOptions;
+  List<String> get subjects => <String>[
+        for (final SubjectOption subject in _subjectOptions) subject.name,
+      ];
+  String? get catalogError => _catalogError;
+
+  Place? placeById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    for (final Place place in _places) {
+      if (place.id == id) return place;
+    }
+    return null;
+  }
+
+  PublicPlace? publicPlaceFor(String? placeId, LocationPrivacy privacy) {
+    if (privacy == LocationPrivacy.hidden) return null;
+    final Place? place = placeById(placeId);
+    if (place == null) return null;
+    if (privacy == LocationPrivacy.cityOnly) {
+      return PublicPlace(
+        label: place.city.name,
+        city: place.city.name,
+        region: place.city.region,
+        latitude: place.city.latitude,
+        longitude: place.city.longitude,
+        cityOnly: true,
+      );
+    }
+    return PublicPlace(
+      label: place.label,
+      city: place.city.name,
+      region: place.city.region,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      cityOnly: false,
+    );
+  }
+
+  Future<void> _loadCatalog() async {
+    final List<dynamic> results = await Future.wait(<Future<dynamic>>[
+      _catalog.areas(),
+      _catalog.subjects(),
+    ]);
+    final AreaCatalogue areas = results[0] as AreaCatalogue;
+    _cities = areas.cities;
+    _places = areas.places;
+    _regions = areas.regions;
+    _subjectOptions = results[1] as List<SubjectOption>;
+    _catalogError = null;
   }
 
   // ── Session ────────────────────────────────────────────────────────────────
-  //
-  // There is no real account behind the forms, but there is still a real
-  // boundary between the public pages and the dashboard. One flag owns it, and
-  // one route guard reads it, so Back and a typed URL cannot slip past.
 
   bool _signedIn = false;
   bool get isSignedIn => _signedIn;
 
-  /// Called only after a form or demo sign-in has completed its field setup.
-  void signIn() {
-    if (_signedIn) return;
-    _signedIn = true;
-    notifyListeners();
-  }
+  UserAccount? _user;
+  UserAccount? get user => _user;
 
-  /// Clearing this flag is what makes the dashboard unreachable until the next
-  /// sign-in. The navigation itself lives in [AuthFlow.signOut].
-  void signOut() {
-    if (!_signedIn && _pendingDestination == null) return;
-    _signedIn = false;
-    _pendingDestination = null;
-    notifyListeners();
-  }
+  String? get currentUserId => _user?.id;
+
+  Role _role = Role.student;
+  Role get role => _role;
 
   PendingDestination? _pendingDestination;
-
-  /// The page a signed-out visitor originally asked for. Never notified: it is
-  /// consumed by the next route decision, not drawn by a widget.
   PendingDestination? get pendingDestination => _pendingDestination;
 
   void rememberDestination(String route, [Object? arguments]) {
@@ -97,38 +202,356 @@ class AppState extends ChangeNotifier {
 
   void clearPendingDestination() => _pendingDestination = null;
 
-  /// The viewer's own picture, in memory only: bytes, not a path and not a URL,
-  /// because there is no filesystem and no server behind this prototype. Every
-  /// avatar of the viewer reads it from here, so one pick lands in the profile
-  /// header and in the preview at the same moment — and removing it puts the
-  /// initials back everywhere at once.
-  Uint8List? _photo;
-  Uint8List? get photo => _photo;
-  set photo(Uint8List? value) {
-    if (identical(value, _photo)) return;
-    _photo = value;
+  Future<UserAccount> login({
+    required String email,
+    required String password,
+  }) async {
+    final AuthSession session = await _auth.login(email: email, password: password);
+    _user = session.user;
+    _signedIn = true;
+    _role = session.user.role;
+    _startupError = null;
+    notifyListeners();
+    await _afterAuth();
+    return session.user;
+  }
+
+  Future<UserAccount> register({
+    required String email,
+    required String password,
+    required Role role,
+    required String displayName,
+  }) async {
+    final AuthSession session = await _auth.register(
+      email: email,
+      password: password,
+      role: role,
+      displayName: displayName,
+    );
+    _user = session.user;
+    _signedIn = true;
+    _role = session.user.role;
+    _startupError = null;
+    notifyListeners();
+    await _afterAuth();
+    return session.user;
+  }
+
+  Future<void> _afterAuth() async {
+    try {
+      await _loadProfile();
+      unawaited(loadMatches());
+      unawaited(loadRequests());
+      unawaited(loadConversations());
+    } on ApiException catch (error) {
+      if (error.statusCode == 401) {
+        _handleUnauthorized();
+      } else {
+        _startupError = error.message;
+      }
+      notifyListeners();
+    }
+  }
+
+  void signOut() {
+    _signedIn = false;
+    _user = null;
+    _profile = Profile.blank(_role);
+    _savedProfile = _profile;
+    _profileSaveGeneration++;
+    _photo = null;
+    _personPhotos.clear();
+    _matches = const <MatchResult>[];
+    _matchesLoaded = false;
+    _requests = const <MatchRequest>[];
+    _conversations = const <Conversation>[];
+    _pendingDestination = null;
+    _startupError = null;
+    notifyListeners();
+    unawaited(_auth.logout());
+  }
+
+  void _handleUnauthorized() {
+    if (!_signedIn && _user == null) return;
+    _signedIn = false;
+    _user = null;
+    _profile = Profile.blank(_role);
+    _savedProfile = _profile;
+    _profileSaveGeneration++;
+    _photo = null;
+    _personPhotos.clear();
+    _matches = const <MatchResult>[];
+    _matchesLoaded = false;
+    _requests = const <MatchRequest>[];
+    _conversations = const <Conversation>[];
+    _pendingDestination = null;
     notifyListeners();
   }
+
+  // ── Profile ────────────────────────────────────────────────────────────────
+
+  Profile _profile = Profile.blank(Role.student);
+  Profile _savedProfile = Profile.blank(Role.student);
+  Profile get profile => _profile;
+  int _profileSaveGeneration = 0;
+
+  bool get profileAnswered => _profile.onboardingComplete;
+
+  Uint8List? _photo;
+  Uint8List? get photo => _photo;
+
+  final Map<String, Uint8List> _personPhotos = <String, Uint8List>{};
+  final Set<String> _photoRequests = <String>{};
+
+  Uint8List? photoFor(String userId) => _personPhotos[userId];
+
+  Future<void> _loadProfile() async {
+    _profile = await _profiles.getOwn();
+    _savedProfile = _profile;
+    _role = _profile.role;
+    _matchesLoaded = false;
+    await _loadOwnPhoto();
+    notifyListeners();
+  }
+
+  Future<void> _loadOwnPhoto() async {
+    if (!_profile.hasPhoto) {
+      _photo = null;
+      return;
+    }
+    try {
+      _photo = await _profiles.getPhoto(_profile.userId);
+    } on ApiException {
+      _photo = null;
+    }
+  }
+
+  /// Optimistically applies a profile edit and persists the whole profile. A
+  /// failed save restores the previous values, so a control never claims a
+  /// change the server rejected.
+  Future<Profile> updateProfile(Profile next) async {
+    final int generation = ++_profileSaveGeneration;
+    _profile = next;
+    notifyListeners();
+    try {
+      final Profile saved = await _profiles.update(next);
+      if (generation == _profileSaveGeneration) {
+        _profile = saved;
+        _savedProfile = saved;
+        _matchesLoaded = false;
+        _scheduleMatchReload();
+        notifyListeners();
+      }
+      return saved;
+    } on ApiException {
+      if (generation == _profileSaveGeneration) {
+        _profile = _savedProfile;
+        notifyListeners();
+      }
+      rethrow;
+    }
+  }
+
+  /// Applies a local answer immediately while the screen debounces the save.
+  /// It is the same profile object the server returns, just before the round
+  /// trip; [saveProfile] persists it.
+  void previewProfile(Profile next) {
+    _profile = next;
+    notifyListeners();
+  }
+
+  Future<Profile> saveProfile() => updateProfile(_profile);
+
+  Future<void> uploadPhoto(Uint8List bytes, String filename) async {
+    final Profile saved = await _profiles.uploadPhoto(bytes, filename);
+    _profile = saved;
+    _savedProfile = saved;
+    _photo = await _profiles.getPhoto(saved.userId);
+    _personPhotos[saved.userId] = _photo!;
+    notifyListeners();
+  }
+
+  Future<void> deletePhoto() async {
+    await _profiles.deletePhoto();
+    _profile = _profile.copyWith(clearPhoto: true);
+    _savedProfile = _profile;
+    _photo = null;
+    if (currentUserId != null) _personPhotos.remove(currentUserId);
+    notifyListeners();
+  }
+
+  Future<void> loadPhotoFor(String userId, {String? photoUrl}) async {
+    if (userId.isEmpty || photoUrl == null || photoUrl.isEmpty) return;
+    if (_personPhotos.containsKey(userId) || _photoRequests.contains(userId)) {
+      return;
+    }
+    _photoRequests.add(userId);
+    try {
+      _personPhotos[userId] = await _profiles.getPhoto(userId);
+      notifyListeners();
+    } on ApiException {
+      // A missing picture falls back to initials; it is not a screen error.
+    } finally {
+      _photoRequests.remove(userId);
+    }
+  }
+
+  Candidate candidateForProfile(Profile profile) =>
+      candidateFromProfile(profile, photo: _photo);
+
+  // ── Matches ────────────────────────────────────────────────────────────────
+
+  List<MatchResult> _matches = const <MatchResult>[];
+  List<MatchResult> get matches => _matches;
+
+  List<Candidate> get pool => <Candidate>[
+        for (final MatchResult result in _matches) result.candidate,
+      ];
+
+  int _poolSize = 0;
+  int get poolSize => _poolSize;
+  int _rankedCount = 0;
+  int get rankedCount => _rankedCount;
+  ColdStart? _coldStart;
+  ColdStart? get coldStart => _coldStart;
+
+  bool _matchesLoading = false;
+  bool get matchesLoading => _matchesLoading;
+  bool _matchesLoaded = false;
+  bool get matchesLoaded => _matchesLoaded;
+  String? _matchesError;
+  String? get matchesError => _matchesError;
+
+  int _matchGeneration = 0;
+  Timer? _matchTimer;
 
   MatchFilters _filters = const MatchFilters();
   MatchFilters get filters => _filters;
   set filters(MatchFilters value) {
+    if (value == _filters) return;
     _filters = value;
     notifyListeners();
+    _scheduleMatchReload();
   }
 
-  /// True once somebody has actually answered the onboarding questions. Drives
-  /// the "based on your profile" label on the match cards, which is the only
-  /// honest thing to show a person whose answers we just used.
-  bool _profileAnswered = false;
-  bool get profileAnswered => _profileAnswered;
-  set profileAnswered(bool value) {
-    _profileAnswered = value;
+  void _scheduleMatchReload() {
+    _matchTimer?.cancel();
+    _matchTimer = Timer(const Duration(milliseconds: 350), () {
+      if (_signedIn) unawaited(loadMatches());
+    });
+  }
+
+  Future<void> ensureMatches() async {
+    if (!_signedIn || _matchesLoading || _matchesLoaded) return;
+    await loadMatches();
+  }
+
+  Future<void> loadMatches() async {
+    if (!_signedIn) return;
+    final int generation = ++_matchGeneration;
+    _matchesLoading = true;
+    _matchesError = null;
     notifyListeners();
+    try {
+      final MatchBatch batch = await _matchRepository.fetch(_filters);
+      if (generation != _matchGeneration) return;
+      _matches = batch.matches;
+      _poolSize = batch.poolSize;
+      _rankedCount = batch.rankedCount;
+      _coldStart = batch.coldStart;
+      _matchesLoaded = true;
+      notifyListeners();
+      unawaited(_hydrateMatchPhotos(batch.matches));
+    } on ApiException catch (error) {
+      if (generation != _matchGeneration) return;
+      _matchesError = error.message;
+      _matchesLoaded = true;
+    } finally {
+      if (generation == _matchGeneration) {
+        _matchesLoading = false;
+        notifyListeners();
+      }
+    }
   }
 
-  /// Set, then cleared, when a request is sent. The confirmation lives on the
-  /// detail screen rather than in a modal, so this only carries the reference.
+  Future<void> _hydrateMatchPhotos(List<MatchResult> matches) async {
+    final List<MatchResult> current = List<MatchResult>.of(_matches);
+    for (final MatchResult result in matches) {
+      final Candidate candidate = result.candidate;
+      if (candidate.photoUrl == null || candidate.photoUrl!.isEmpty) continue;
+      if (_personPhotos.containsKey(candidate.id)) continue;
+      await loadPhotoFor(candidate.id, photoUrl: candidate.photoUrl);
+      final Uint8List? bytes = _personPhotos[candidate.id];
+      if (bytes == null) continue;
+      for (int i = 0; i < current.length; i++) {
+        if (current[i].candidate.id == candidate.id) {
+          current[i] = current[i].copyWith(
+            candidate: current[i].candidate.copyWith(photo: bytes),
+          );
+        }
+      }
+    }
+    if (current.isNotEmpty) {
+      _matches = current;
+      notifyListeners();
+    }
+  }
+
+  void clearFilters() => filters = const MatchFilters();
+  void relaxFilters(MatchFilters relaxed) => filters = relaxed;
+
+  MatchResult? matchFor(String candidateId) {
+    for (final MatchResult result in _matches) {
+      if (result.candidate.id == candidateId) return result;
+    }
+    return null;
+  }
+
+  String? sharedSubjectFor(Candidate candidate) {
+    for (final String subject in candidate.subjects) {
+      if (_profile.subjects.contains(subject)) return subject;
+    }
+    return null;
+  }
+
+  MatchRequest? requestWith(String candidateId) {
+    for (final MatchRequest request in _requests) {
+      if (request.counterpartId == candidateId) return request;
+    }
+    return null;
+  }
+
+  bool canRequest(Candidate candidate) {
+    if (!_profile.onboardingComplete) return false;
+    if (candidate.role == _profile.role) return false;
+    if (sharedSubjectFor(candidate) == null) return false;
+    final MatchRequest? existing = requestWith(candidate.id);
+    return existing == null || existing.status == RequestStatus.declined;
+  }
+
+  String get profileSummary {
+    final List<bool> availability = _profile.availability;
+    final List<String> parts = <String>[
+      for (int p = 0; p < Week.partLong.length; p++)
+        if (List<int>.generate(Week.days.length, (int d) => d)
+            .any((int d) =>
+                availability.length == Week.cells &&
+                availability[Week.index(d, p)]))
+          Week.partLong[p],
+    ];
+    final String where = parts.isEmpty ? 'no set hours' : parts.join(' and ');
+    return '$where, ${_profile.mode.label.toLowerCase()}, up to \$${_profile.budget}/hr';
+  }
+
+  // ── Requests ───────────────────────────────────────────────────────────────
+
+  List<MatchRequest> _requests = const <MatchRequest>[];
+  List<MatchRequest> get requests => _requests;
+  bool _requestsLoading = false;
+  bool get requestsLoading => _requestsLoading;
+  String? _requestsError;
+  String? get requestsError => _requestsError;
+
   String? _lastRequestReference;
   String? get lastRequestReference => _lastRequestReference;
   set lastRequestReference(String? value) {
@@ -136,323 +559,401 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The pool the current role is browsing. A student browses tutors.
-  List<Candidate> get pool =>
-      _role == Role.student ? sampleTutors : sampleStudents;
+  Future<void> loadRequests() async {
+    if (!_signedIn) return;
+    _requestsLoading = true;
+    _requestsError = null;
+    notifyListeners();
+    try {
+      final List<MatchRequest> list = await _requestRepository.list();
+      list.sort((MatchRequest a, MatchRequest b) =>
+          b.updatedAt.compareTo(a.updatedAt));
+      _requests = list;
+    } on ApiException catch (error) {
+      _requestsError = error.message;
+    } finally {
+      _requestsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<MatchRequest> createRequest({
+    required Candidate candidate,
+    required String subject,
+    required String note,
+  }) async {
+    final MatchRequest request = await _requestRepository.create(
+      counterpartId: candidate.id,
+      subject: subject,
+      note: note,
+    );
+    _requests = <MatchRequest>[
+      request,
+      for (final MatchRequest existing in _requests)
+        if (existing.id != request.id) existing,
+    ];
+    _lastRequestReference = _referenceFor(request.id);
+    final Conversation conversation = Conversation(
+      id: request.conversationId,
+      counterpartId: request.counterpartId,
+      counterpartName: request.counterpartName,
+      counterpartRole: request.counterpartRole,
+      subject: request.subject,
+      status: request.status,
+      requestedByMe: true,
+      score: request.score,
+      requestNote: request.note,
+      counterpartPhotoUrl: request.counterpartPhotoUrl,
+      updatedAt: request.updatedAt,
+    );
+    _conversations = <Conversation>[
+      conversation,
+      for (final Conversation existing in _conversations)
+        if (existing.id != conversation.id) existing,
+    ];
+    notifyListeners();
+    return request;
+  }
+
+  Future<void> acceptConversation(String id) async {
+    final MatchRequest request = await _requestRepository.accept(id);
+    _replaceRequest(request);
+    _setConversationStatus(id, RequestStatus.accepted);
+    notifyListeners();
+  }
+
+  Future<void> declineConversation(
+    String id, {
+    String reason = 'Not the right fit right now.',
+  }) async {
+    final MatchRequest request = await _requestRepository.decline(id, reason);
+    _replaceRequest(request);
+    _setConversationStatus(id, RequestStatus.declined);
+    notifyListeners();
+  }
+
+  void _replaceRequest(MatchRequest request) {
+    _requests = <MatchRequest>[
+      for (final MatchRequest existing in _requests)
+        if (existing.id == request.id) request else existing,
+    ];
+  }
+
+  void _setConversationStatus(String id, RequestStatus status) {
+    _conversations = <Conversation>[
+      for (final Conversation conversation in _conversations)
+        if (conversation.id == id)
+          conversation.copyWith(status: status)
+        else
+          conversation,
+    ];
+  }
 
   // ── Conversations ──────────────────────────────────────────────────────────
-  //
-  // The one place in this prototype where sending something does more than
-  // change the screen it was sent from: a request becomes a conversation, the
-  // other side's answer opens it, and what is typed into it stays until reload.
-  // Either side can send, either side can answer — every entry says which way
-  // the asking went. Seeded from the sample lists, then edited in memory only.
 
-  final List<Conversation> _studentChats =
-      List<Conversation>.of(sampleConversations);
-  final List<Conversation> _tutorChats =
-      List<Conversation>.of(sampleReceivedConversations);
+  List<Conversation> _conversations = const <Conversation>[];
+  List<Conversation> get conversations => _conversations;
+  bool _conversationsLoading = false;
+  bool get conversationsLoading => _conversationsLoading;
+  String? _conversationsError;
+  String? get conversationsError => _conversationsError;
+  final Set<String> _conversationLoading = <String>{};
 
-  /// The conversations for the side you are standing on: what a student sees on
-  /// their messages, and what a tutor sees on theirs.
-  List<Conversation> get conversations =>
-      _role == Role.student ? _studentChats : _tutorChats;
+  int get unreadCount => _conversations.fold<int>(
+        0,
+        (int total, Conversation conversation) =>
+            total + conversation.unreadCount,
+      );
 
-  /// The conversation with [id], whichever side it belongs to. A chat screen
-  /// that stays open keeps working without needing to know which list it was
-  /// opened from.
   Conversation? conversation(String id) {
-    for (final List<Conversation> list
-        in <List<Conversation>>[_studentChats, _tutorChats]) {
-      for (final Conversation c in list) {
-        if (c.id == id) return c;
-      }
+    for (final Conversation conversation in _conversations) {
+      if (conversation.id == id) return conversation;
     }
     return null;
   }
 
-  /// Puts a request into the current side's list as a pending conversation,
-  /// with the note as its first message — from this side, whoever this side is.
-  /// Asking again re-opens that person's conversation rather than stacking a
-  /// second one — one conversation per person, in every state — and a
-  /// conversation that is already accepted is left alone, because there is
-  /// nothing left to ask for.
-  void startConversation(Candidate counterpart, {String? note}) {
-    final List<Conversation> list = conversations;
-    final int existing =
-        list.indexWhere((Conversation c) => c.counterpartId == counterpart.id);
-    if (existing >= 0 && list[existing].status == RequestStatus.accepted) {
-      return;
+  bool isTyping(String conversationId) => false;
+
+  Future<void> loadConversations() async {
+    if (!_signedIn) return;
+    _conversationsLoading = true;
+    _conversationsError = null;
+    notifyListeners();
+    try {
+      final List<Conversation> summaries = await _conversationRepository.list();
+      final Map<String, Conversation> existing = <String, Conversation>{
+        for (final Conversation conversation in _conversations)
+          conversation.id: conversation,
+      };
+      final List<Conversation> merged = <Conversation>[];
+      for (final Conversation summary in summaries) {
+        final Conversation? loaded = existing[summary.id];
+        merged.add(loaded == null
+            ? summary
+            : summary.copyWith(
+                messages: loaded.messages,
+                requestNote: loaded.requestNote,
+                responseNote: loaded.responseNote,
+              ));
+      }
+      merged.sort((Conversation a, Conversation b) {
+        final DateTime left =
+            a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final DateTime right =
+            b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return right.compareTo(left);
+      });
+      _conversations = merged;
+      unawaited(_hydrateConversationPhotos());
+    } on ApiException catch (error) {
+      _conversationsError = error.message;
+    } finally {
+      _conversationsLoading = false;
+      notifyListeners();
     }
-    if (existing >= 0) list.removeAt(existing);
-    list.insert(
-      0,
-      Conversation(
-        id: 'c-${counterpart.id}',
-        counterpartId: counterpart.id,
-        counterpartName: counterpart.name,
-        counterpartRole: counterpart.role,
-        subject: counterpart.subjects.first,
-        status: RequestStatus.pending,
-        requestedByMe: true,
-        messages: <ChatMessage>[
-          if (note != null && note.trim().isNotEmpty)
-            ChatMessage(
-              text: note.trim(),
-              fromMe: true,
-              sentAt: clockLabel(DateTime.now()),
-            ),
-        ],
-      ),
+  }
+
+  Future<void> _hydrateConversationPhotos() async {
+    for (final Conversation conversation
+        in List<Conversation>.of(_conversations)) {
+      if (conversation.counterpartPhotoUrl == null) continue;
+      await loadPhotoFor(
+        conversation.counterpartId,
+        photoUrl: conversation.counterpartPhotoUrl,
+      );
+    }
+  }
+
+  Future<Conversation?> loadConversation(String id) async {
+    if (_conversationLoading.contains(id)) return conversation(id);
+    _conversationLoading.add(id);
+    try {
+      final Conversation detail = await _conversationRepository.get(id);
+      final MessagePageData page =
+          await _conversationRepository.messages(id);
+      Conversation loaded = detail.copyWith(
+        messages: page.messages,
+        unreadCount: page.unreadCount,
+        latestMessageSequence: page.latestSequence,
+        readThroughSequence: page.readThroughSequence,
+      );
+      _upsertConversation(loaded);
+      notifyListeners();
+      unawaited(_hydrateMessageMedia(id, page.messages));
+      if (loaded.unreadCount > 0 && loaded.latestMessageSequence > 0) {
+        loaded = await _markRead(id, loaded.latestMessageSequence);
+      }
+      return loaded;
+    } on ApiException catch (error) {
+      _conversationsError = error.message;
+      notifyListeners();
+      return null;
+    } finally {
+      _conversationLoading.remove(id);
+    }
+  }
+
+  Future<Conversation?> refreshConversation(String id) async {
+    final Conversation? current = conversation(id);
+    if (current == null) return loadConversation(id);
+    try {
+      final Conversation detail = await _conversationRepository.get(id);
+      final MessagePageData page = await _conversationRepository.messages(
+        id,
+        after: current.messages.isEmpty ? null : current.latestMessageSequence,
+      );
+      final List<ChatMessage> messages = <ChatMessage>[
+        ...current.messages,
+        for (final ChatMessage message in page.messages)
+          if (!current.messages.any((ChatMessage existing) =>
+              existing.id == message.id))
+            message,
+      ];
+      messages.sort((ChatMessage a, ChatMessage b) =>
+          a.sequence.compareTo(b.sequence));
+      final Conversation merged = detail.copyWith(
+        messages: messages,
+        unreadCount: page.unreadCount,
+        latestMessageSequence: page.latestSequence,
+        readThroughSequence: page.readThroughSequence,
+      );
+      _upsertConversation(merged);
+      notifyListeners();
+      unawaited(_hydrateMessageMedia(id, page.messages));
+      if (merged.unreadCount > 0) {
+        final Conversation marked =
+            await _markRead(id, merged.latestMessageSequence);
+        return marked;
+      }
+      return merged;
+    } on ApiException {
+      return current;
+    }
+  }
+
+  Future<void> _hydrateMessageMedia(
+    String conversationId,
+    List<ChatMessage> messages,
+  ) async {
+    for (final ChatMessage message in messages) {
+      if (message.kind != MessageKind.image ||
+          message.mediaUrl == null ||
+          message.image != null) {
+        continue;
+      }
+      try {
+        final Uint8List bytes =
+            await _conversationRepository.media(message.mediaUrl!);
+        _replaceMessage(conversationId, message.id, (ChatMessage existing) {
+          return existing.copyWith(image: bytes);
+        });
+        notifyListeners();
+      } on ApiException {
+        // The bubble keeps its caption when the private media cannot load.
+      }
+    }
+  }
+
+  void _replaceMessage(
+    String conversationId,
+    String? messageId,
+    ChatMessage Function(ChatMessage message) update,
+  ) {
+    _conversations = <Conversation>[
+      for (final Conversation conversation in _conversations)
+        if (conversation.id == conversationId)
+          conversation.copyWith(
+            messages: <ChatMessage>[
+              for (final ChatMessage message in conversation.messages)
+                if (message.id == messageId) update(message) else message,
+            ],
+          )
+        else
+          conversation,
+    ];
+  }
+
+  Future<void> sendMessage(String id, String text) async {
+    final ChatMessage message =
+        await _conversationRepository.sendText(id, text);
+    _appendMessage(id, message);
+    notifyListeners();
+  }
+
+  Future<void> sendImage(
+    String id,
+    Uint8List bytes, {
+    String filename = 'photo.jpg',
+  }) async {
+    final ChatMessage message =
+        await _conversationRepository.sendImage(id, bytes, filename);
+    _appendMessage(id, message);
+    notifyListeners();
+    unawaited(_hydrateMessageMedia(id, <ChatMessage>[message]));
+  }
+
+  Future<void> sendVoice(String id, int seconds) async {
+    final ChatMessage message =
+        await _conversationRepository.sendVoiceNote(id, seconds);
+    _appendMessage(id, message);
+    notifyListeners();
+  }
+
+  Future<void> proposeSession(String id, DateTime at) async {
+    final ChatMessage message =
+        await _conversationRepository.proposeSession(id, at);
+    _appendMessage(id, message);
+    notifyListeners();
+  }
+
+  Future<void> answerSession(
+    String conversationId,
+    String messageId,
+    SessionState state,
+  ) async {
+    final ChatMessage message = await _conversationRepository.respondToSession(
+      conversationId,
+      messageId,
+      state,
+    );
+    _replaceMessage(
+      conversationId,
+      messageId,
+      (ChatMessage existing) =>
+          existing.copyWith(sessionState: message.sessionState),
     );
     notifyListeners();
   }
 
-  /// The receiver's two answers. Both unlock or close the chat; neither can be
-  /// taken back here, which is what makes the status worth reading.
-  void acceptConversation(String id) =>
-      _setConversationStatus(id, RequestStatus.accepted);
-  void declineConversation(String id) =>
-      _setConversationStatus(id, RequestStatus.declined);
-
-  void _setConversationStatus(String id, RequestStatus status) {
-    for (final List<Conversation> list
-        in <List<Conversation>>[_studentChats, _tutorChats]) {
-      final int i = list.indexWhere((Conversation c) => c.id == id);
-      if (i < 0) continue;
-      if (list[i].status == status) return;
-      list[i] = list[i].copyWith(status: status);
-      notifyListeners();
-      return;
-    }
-  }
-
-  /// Conversations where the scripted answer is being composed. The chat shows
-  /// three moving dots while this is true; nothing else in the app reads it.
-  final Set<String> _typing = <String>{};
-  final Map<String, Timer> _typingTimers = <String, Timer>{};
-  final Map<String, Timer> _replyTimers = <String, Timer>{};
-
-  bool isTyping(String conversationId) => _typing.contains(conversationId);
-
-  int _serial = 0;
-  String _nextMessageId() =>
-      'm-${DateTime.now().microsecondsSinceEpoch}-${_serial++}';
-
-  /// Sends [text] from this side. It lands immediately; a moment later the
-  /// other side starts typing, and about a second and a half after that they
-  /// answer once — the whole of the other side's behaviour in this prototype.
-  /// It answers only if the last word is still yours, so three quick lines earn
-  /// one reply, not three.
-  void sendMessage(String id, String text) {
-    final String body = text.trim();
-    if (body.isEmpty) return;
-    _send(
-      id,
-      ChatMessage(
-        id: _nextMessageId(),
-        text: body,
-        fromMe: true,
-        sentAt: clockLabel(DateTime.now()),
-      ),
-    );
-  }
-
-  /// A picked picture. Bytes stay in the message, in memory, for as long as
-  /// this tab is open; nothing is encoded, uploaded or written to disk.
-  void sendImage(String id, Uint8List bytes) {
-    if (bytes.isEmpty) return;
-    _send(
-      id,
-      ChatMessage(
-        id: _nextMessageId(),
-        text: 'Photo',
-        fromMe: true,
-        sentAt: clockLabel(DateTime.now()),
-        kind: MessageKind.image,
-        image: bytes,
-      ),
-    );
-  }
-
-  /// A simulated voice note. [seconds] is the length the bubble plays for;
-  /// there is no audio anywhere in this prototype.
-  void sendVoice(String id, int seconds) {
-    final int length = seconds < 1 ? 1 : seconds;
-    _send(
-      id,
-      ChatMessage(
-        id: _nextMessageId(),
-        text: 'Voice note · ${voiceLabel(length)}',
-        fromMe: true,
-        sentAt: clockLabel(DateTime.now()),
-        kind: MessageKind.voice,
-        seconds: length,
-      ),
-    );
-  }
-
-  /// A card, not a message: the date has already been chosen in the pickers.
-  void proposeSession(String id, DateTime at) {
-    _send(
-      id,
-      ChatMessage(
-        id: _nextMessageId(),
-        text: 'Session proposed · ${describeSession(at)}',
-        fromMe: true,
-        sentAt: clockLabel(DateTime.now()),
-        kind: MessageKind.session,
-        sessionWhen: describeSession(at),
-      ),
-    );
-  }
-
-  /// Answers a session card. Final, like the request's own answer: a second tap
-  /// cannot undo the first.
-  void answerSession(
-    String conversationId,
-    String messageId,
-    SessionState answer,
-  ) {
-    if (answer == SessionState.proposed) return;
-    for (final List<Conversation> list
-        in <List<Conversation>>[_studentChats, _tutorChats]) {
-      final int i = list.indexWhere((Conversation c) => c.id == conversationId);
-      if (i < 0) continue;
-      final Conversation c = list[i];
-      if (c.status != RequestStatus.accepted) return;
-      final int m = c.messages.indexWhere(
-        (ChatMessage message) =>
-            message.id == messageId && message.kind == MessageKind.session,
-      );
-      if (m < 0 || c.messages[m].sessionState != SessionState.proposed) return;
-      final List<ChatMessage> messages = List<ChatMessage>.of(c.messages);
-      messages[m] = messages[m].copyWith(sessionState: answer);
-      list[i] = c.copyWith(messages: messages);
-      notifyListeners();
-      return;
-    }
-  }
-
-  /// Records a call the way the thread will read it: a length when it
-  /// connected, "Missed call" when it was hung up while still ringing.
-  void logCall(
+  Future<void> logCall(
     String id, {
-    required bool video,
+    required String kind,
     required bool connected,
-    required Duration duration,
-  }) {
-    final Conversation? current = conversation(id);
-    if (current == null || current.status != RequestStatus.accepted) return;
-    _appendMessage(
+    required int durationSeconds,
+  }) async {
+    final ChatMessage message = await _conversationRepository.logCall(
       id,
-      ChatMessage(
-        text: connected
-            ? '${video ? 'Video' : 'Voice'} call · ${elapsedClock(duration)}'
-            : 'Missed call',
-        fromMe: true,
-        sentAt: clockLabel(DateTime.now()),
-        kind: MessageKind.call,
-      ),
+      kind: kind,
+      connected: connected,
+      durationSeconds: durationSeconds,
     );
-  }
-
-  /// The one door all outgoing messages use: validate the open thread, land the
-  /// message, then schedule the scripted answer.
-  void _send(String id, ChatMessage message) {
-    final Conversation? current = conversation(id);
-    if (current == null || current.status != RequestStatus.accepted) return;
     _appendMessage(id, message);
-    _scheduleReply(id);
+    notifyListeners();
   }
 
-  void _scheduleReply(String id) {
-    _typingTimers[id]?.cancel();
-    _replyTimers[id]?.cancel();
-    if (_typing.remove(id)) notifyListeners();
-
-    _typingTimers[id] = Timer(const Duration(milliseconds: 450), () {
-      if (!_canReply(id)) return;
-      _typing.add(id);
-      notifyListeners();
-    });
-    _replyTimers[id] = Timer(const Duration(milliseconds: 1600), () {
-      final bool wasTyping = _typing.remove(id);
-      if (!_canReply(id)) {
-        if (wasTyping) notifyListeners();
-        return;
-      }
-      _appendMessage(
-        id,
-        ChatMessage(
-          text: _autoReply,
-          fromMe: false,
-          sentAt: clockLabel(DateTime.now()),
-        ),
-      );
-    });
+  Future<Conversation> _markRead(String id, int sequence) async {
+    final ReadStateData state =
+        await _conversationRepository.markRead(id, throughSequence: sequence);
+    Conversation? updated;
+    _conversations = <Conversation>[
+      for (final Conversation conversation in _conversations)
+        if (conversation.id == id)
+          updated = conversation.copyWith(
+            unreadCount: state.unreadCount,
+            readThroughSequence: state.readThroughSequence,
+            latestMessageSequence: state.latestMessageSequence,
+          )
+        else
+          conversation,
+    ];
+    notifyListeners();
+    return updated ?? conversation(id)!;
   }
-
-  bool _canReply(String id) {
-    final Conversation? latest = conversation(id);
-    return latest != null &&
-        latest.status == RequestStatus.accepted &&
-        latest.messages.isNotEmpty &&
-        latest.messages.last.fromMe;
-  }
-
-  /// The other side's entire vocabulary here: one line, sent once, after every
-  /// message you write. There is nobody at the other end of this prototype.
-  static const String _autoReply =
-      'Got it — give me a moment and I will come back to you properly.';
 
   void _appendMessage(String id, ChatMessage message) {
-    for (final List<Conversation> list
-        in <List<Conversation>>[_studentChats, _tutorChats]) {
-      final int i = list.indexWhere((Conversation c) => c.id == id);
-      if (i < 0) continue;
-      list[i] = list[i].copyWith(
-        messages: <ChatMessage>[...list[i].messages, message],
-      );
-      notifyListeners();
-      return;
-    }
+    final Conversation? current = conversation(id);
+    if (current == null) return;
+    final List<ChatMessage> messages = <ChatMessage>[
+      ...current.messages,
+      message,
+    ]..sort((ChatMessage a, ChatMessage b) =>
+        a.sequence.compareTo(b.sequence));
+    _upsertConversation(current.copyWith(
+      messages: messages,
+      latestMessageSequence: message.sequence,
+      readThroughSequence: message.sequence,
+      unreadCount: 0,
+    ));
   }
 
-  /// A one-line description of the answers the ranking actually used. Shown on
-  /// the "based on your profile" chip and in the empty state, so the label is
-  /// never a vague assurance.
-  String get profileSummary {
-    final List<bool> a = _profile.availability;
-    final List<String> parts = <String>[
-      for (int p = 0; p < Week.partLong.length; p++)
-        if (List<int>.generate(Week.days.length, (int d) => d)
-            .any((int d) => a[Week.index(d, p)]))
-          Week.partLong[p],
+  void _upsertConversation(Conversation conversation) {
+    _conversations = <Conversation>[
+      conversation,
+      for (final Conversation existing in _conversations)
+        if (existing.id != conversation.id) existing,
     ];
-    final String where = parts.isEmpty ? 'no set hours' : parts.join(' and ');
-    return '$where, ${_profile.mode.label.toLowerCase()}, up to \$${_profile.budget}/hr';
   }
 
-  /// Resets the filters to "show me everything ranked". Used by the empty state
-  /// and by the filter rail's reset.
-  void clearFilters() => filters = const MatchFilters();
-
-  /// Applies the adjustment the empty state suggested.
-  void relaxFilters(MatchFilters relaxed) => filters = relaxed;
+  String _referenceFor(String id) {
+    final String compact = id.replaceAll('-', '').toUpperCase();
+    final String tail =
+        compact.length > 6 ? compact.substring(compact.length - 6) : compact;
+    return 'TM-$tail';
+  }
 
   @override
   void dispose() {
-    // A queued reply must not call notifyListeners on a disposed state.
-    for (final Timer timer in <Timer>[
-      ..._typingTimers.values,
-      ..._replyTimers.values,
-    ]) {
-      timer.cancel();
-    }
-    _typingTimers.clear();
-    _replyTimers.clear();
-    _typing.clear();
+    _matchTimer?.cancel();
     super.dispose();
   }
 }
@@ -468,15 +969,14 @@ class AppStateScope extends InheritedNotifier<AppState> {
   static AppState of(BuildContext context) {
     final AppStateScope? scope =
         context.dependOnInheritedWidgetOfExactType<AppStateScope>();
-    assert(scope != null, 'No AppStateScope above this widget.');
+    assert(scope != null, 'No AppStateScope found in context');
     return scope!.notifier!;
   }
 
-  /// For widgets that only need to call a method, never to rebuild.
   static AppState read(BuildContext context) {
     final AppStateScope? scope =
         context.getInheritedWidgetOfExactType<AppStateScope>();
-    assert(scope != null, 'No AppStateScope above this widget.');
+    assert(scope != null, 'No AppStateScope found in context');
     return scope!.notifier!;
   }
 }

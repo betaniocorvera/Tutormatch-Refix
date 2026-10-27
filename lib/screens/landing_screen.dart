@@ -16,8 +16,8 @@
 // never rebuilds while scrolling: the transform on the sticky stage is the only
 // paint-time change per frame.
 //
-// Below the fold the page is paper again: how the ranking works, the subjects
-// in the sample pool, and the way in. The ranked rows themselves live behind
+// Below the fold the page is paper again: how the ranking works, the live
+// subject catalogue, and the way in. The ranked rows themselves live behind
 // sign-in on the matches screen; this page never duplicates them.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -200,7 +200,7 @@ class _LandingScreenState extends State<LandingScreen>
   /// destination and this is the only place that knows all of them.
   List<_StageCopy> _copies(BuildContext context) => <_StageCopy>[
     _StageCopy(
-      eyebrow: '16 sample tutors · one shared week',
+      eyebrow: 'Five dimensions · one shared week',
       title: 'The tutor who is free on Tuesday at six.',
       body: 'Most tutoring sites rank on subject and price, then leave you to '
           'discover that nobody is free when you are. This one ranks the five '
@@ -240,7 +240,8 @@ class _LandingScreenState extends State<LandingScreen>
     final bool wide = width >= TMLayout.shellRail;
     final double gutter = TMLayout.gutter(context);
 
-    final List<MatchResult> ranked = rank(sampleTutors, demoStudentProfile);
+    final AppState state = AppStateScope.of(context);
+    final List<MatchResult> ranked = state.matches;
     final Map<String, MatchResult> byId = <String, MatchResult>{
       for (final MatchResult r in ranked) r.candidate.id: r,
     };
@@ -249,27 +250,20 @@ class _LandingScreenState extends State<LandingScreen>
         NeighborNode(
           id: r.candidate.id,
           name: r.candidate.name,
-          subject: r.candidate.subjects.first,
+          subject: r.candidate.subjects.isEmpty
+              ? 'Tutoring'
+              : r.candidate.subjects.first,
           score: r.score.total,
           tint: r.candidate.photoTint,
         ),
     ];
 
-    // The pool, counted by subject. Ties are broken by name so the four cards
-    // do not reshuffle between builds.
-    final Map<String, List<Candidate>> bySubject = <String, List<Candidate>>{};
-    for (final Candidate tutor in sampleTutors) {
-      for (final String subject in tutor.subjects) {
-        bySubject.putIfAbsent(subject, () => <Candidate>[]).add(tutor);
-      }
-    }
+    // The catalogue is public, so the subject strip can be honest before
+    // sign-in. It lists what the API supports, not people who are not there.
     final List<_SubjectStat> subjects = <_SubjectStat>[
-      for (final MapEntry<String, List<Candidate>> entry in bySubject.entries)
-        _SubjectStat(subject: entry.key, tutors: entry.value),
-    ]..sort((a, b) {
-        final int byCount = b.tutors.length.compareTo(a.tutors.length);
-        return byCount != 0 ? byCount : a.subject.compareTo(b.subject);
-      });
+      for (final String subject in state.subjects)
+        _SubjectStat(subject: subject, tutors: const <Candidate>[]),
+    ];
 
     return Scaffold(
       backgroundColor: AppColors.paper,
@@ -321,7 +315,11 @@ class _LandingScreenState extends State<LandingScreen>
                                   // ── How it works ─────────────────────────────
                                   Container(
                                     key: _howKey,
-                                    child: _About(wide: wide, onStart: _start),
+                                    child: _About(
+                                      wide: wide,
+                                      subjectCount: state.subjects.length,
+                                      onStart: _start,
+                                    ),
                                   ),
 
                                   SizedBox(height: Space.band(width)),
@@ -1277,9 +1275,14 @@ class _CountUp extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _About extends StatelessWidget {
-  const _About({required this.wide, required this.onStart});
+  const _About({
+    required this.wide,
+    required this.subjectCount,
+    required this.onStart,
+  });
 
   final bool wide;
+  final int subjectCount;
   final void Function(Role role) onStart;
 
   static const List<(String, String, String, TMIconName)> _steps =
@@ -1383,7 +1386,7 @@ class _About extends StatelessWidget {
             ],
           ),
         SizedBox(height: wide ? Space.vast : Space.huge),
-        const _CounterStrip(),
+        _CounterStrip(subjectCount: subjectCount),
       ],
     );
   }
@@ -1441,21 +1444,22 @@ class _Step extends StatelessWidget {
   }
 }
 
-/// Four numbers, counted from the sample pool, with the caption that keeps them
-/// honest. Nothing here is a market statistic: the pool is sixteen people in a
-/// prototype.
+/// Four numbers the product can stand behind: the live subject catalogue, the
+/// fixed dimensions, the scale, and the onboarding estimate.
 class _CounterStrip extends StatelessWidget {
-  const _CounterStrip();
+  const _CounterStrip({required this.subjectCount});
 
-  static const List<(int, String, String)> _counters = <(int, String, String)>[
-    (16, 'sample tutors in the pool', ''),
-    (5, 'dimensions compared', ''),
-    (100, 'points on the scale', ''),
-    (2, 'minutes to answer five questions', 'min'),
-  ];
+  final int subjectCount;
 
   @override
   Widget build(BuildContext context) {
+    final List<(int, String, String)> counters = <(int, String, String)>[
+      (subjectCount, 'subjects in the live catalogue', ''),
+      (5, 'dimensions compared', ''),
+      (100, 'points on the scale', ''),
+      (2, 'minutes to answer five questions', 'min'),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -1463,11 +1467,11 @@ class _CounterStrip extends StatelessWidget {
         const SizedBox(height: Space.lg),
         Row(
           children: <Widget>[
-            const TMMicroLabelText('Sample data'),
+            const TMMicroLabelText('Live catalogue'),
             const Spacer(),
             Flexible(
               child: Text(
-                'Counted from this prototype\'s own pool',
+                'Loaded from the TutorMatch API',
                 style: AppType.bodySmall.quieter,
                 textAlign: TextAlign.right,
               ),
@@ -1486,13 +1490,13 @@ class _CounterStrip extends StatelessWidget {
               spacing: Space.xl,
               runSpacing: Space.xxl,
               children: <Widget>[
-                for (int i = 0; i < _counters.length; i++)
+                for (int i = 0; i < counters.length; i++)
                   SizedBox(
                     width: cell,
                     child: _CountUp(
-                      value: _counters[i].$1,
-                      label: _counters[i].$2,
-                      suffix: _counters[i].$3,
+                      value: counters[i].$1,
+                      label: counters[i].$2,
+                      suffix: counters[i].$3,
                       delay: Duration(
                         milliseconds: Motion.stagger.inMilliseconds * i,
                       ),
@@ -1583,9 +1587,10 @@ class _SubjectsCarouselState extends State<_SubjectsCarousel> {
       children: <Widget>[
         _Reveal(
           child: const TMSectionHeading(
-            title: 'What this pool actually teaches.',
-            lede: 'Counted from the sixteen sample tutors, not from a market '
-                'report. Each card opens registration for that subject.',
+            title: 'What you can study.',
+            lede: 'The live subject catalogue from the TutorMatch API. Choose a '
+                'subject when you register, and the ranking only considers '
+                'people who teach or need it.',
             width: 480,
             scale: TMSectionScale.large,
           ),
@@ -1751,37 +1756,46 @@ class _SubjectCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
-              Text(
-                '${stat.tutors.length}',
-                style: AppType.figureLarge.tone(AppColors.accent),
-              ),
-            ],
-          ),
-          const SizedBox(height: Space.sm),
-          Text(
-            stat.tutors.length == 1
-                ? '1 tutor in the sample pool'
-                : '${stat.tutors.length} tutors in the sample pool',
-            style: AppType.bodySmall.quieter,
-          ),
-          const SizedBox(height: Space.xl),
-          Row(
-            children: <Widget>[
-              for (int i = 0; i < shown.length; i++) ...<Widget>[
-                if (i > 0) const SizedBox(width: Space.sm),
-                TMAvatar(shown[i].name, size: 28, tint: shown[i].photoTint),
-              ],
-              if (more > 0) ...<Widget>[
-                const SizedBox(width: Space.sm),
+              if (stat.tutors.isNotEmpty) ...<Widget>[
+                const Spacer(),
                 Text(
-                  '+$more',
-                  style: AppType.figure
-                      .copyWith(fontSize: 12, color: AppColors.inkMuted),
+                  '${stat.tutors.length}',
+                  style: AppType.figureLarge.tone(AppColors.accent),
                 ),
               ],
             ],
           ),
+          const SizedBox(height: Space.sm),
+          Text(
+            stat.tutors.isEmpty
+                ? 'Available in the subject catalogue'
+                : stat.tutors.length == 1
+                    ? '1 tutor in your current results'
+                    : '${stat.tutors.length} tutors in your current results',
+            style: AppType.bodySmall.quieter,
+          ),
+          const SizedBox(height: Space.xl),
+          if (shown.isNotEmpty)
+            Row(
+              children: <Widget>[
+                for (int i = 0; i < shown.length; i++) ...<Widget>[
+                  if (i > 0) const SizedBox(width: Space.sm),
+                  TMAvatar(
+                    shown[i].name,
+                    size: 28,
+                    photo: shown[i].photo,
+                  ),
+                ],
+                if (more > 0) ...<Widget>[
+                  const SizedBox(width: Space.sm),
+                  Text(
+                    '+$more',
+                    style: AppType.figure
+                        .copyWith(fontSize: 12, color: AppColors.inkMuted),
+                  ),
+                ],
+              ],
+            ),
           const SizedBox(height: Space.xl),
           const SizedBox(height: 1, child: ColoredBox(color: AppColors.rule)),
           const SizedBox(height: Space.sm),
@@ -1838,8 +1852,8 @@ class _CtaBand extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 420),
           child: Text(
             'Two minutes of questions, then a ranked list with the arithmetic '
-            'showing. This is an interface prototype: nothing is charged, and '
-            'nothing is stored.',
+            'showing. Your answers are stored by the TutorMatch API so the list '
+            'survives a sign-out; no payment is taken.',
             style: AppType.body.tone(AppColors.onInkQuiet),
           ),
         ),
@@ -1908,8 +1922,8 @@ class _CtaBand extends StatelessWidget {
   }
 }
 
-/// The small print. Links first, then the one sentence this whole prototype
-/// keeps having to say: everybody on it is sample data.
+/// The small print. Links first, then the sentence that says what the scores
+/// are computed from and what the product does not do yet.
 class _LandingFooter extends StatelessWidget {
   const _LandingFooter({
     required this.wide,
@@ -2062,8 +2076,8 @@ class _LandingFooter extends StatelessWidget {
                       const SizedBox(width: Space.xl),
                       Flexible(
                         child: Text(
-                          'Interface prototype — every tutor, student, score and '
-                          'review on this site is sample data.',
+                          'Scores are computed by the TutorMatch API from the '
+                          'five answers. Reviews are not collected yet.',
                           style: AppType.bodySmall.quieter,
                         ),
                       ),
@@ -2079,8 +2093,8 @@ class _LandingFooter extends StatelessWidget {
                       ),
                       const SizedBox(height: Space.xs),
                       Text(
-                        'Interface prototype — every tutor, student, score and '
-                        'review on this site is sample data.',
+                        'Scores are computed by the TutorMatch API from the '
+                        'five answers. Reviews are not collected yet.',
                         style: AppType.bodySmall.quieter,
                       ),
                     ],

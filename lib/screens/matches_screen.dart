@@ -15,10 +15,12 @@
 //     closeness — not a dead end.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -42,33 +44,38 @@ class MatchesScreen extends StatefulWidget {
 }
 
 class _MatchesScreenState extends State<MatchesScreen> {
-  /// The first ranking pass. A real service round trip would land here, and the
-  /// skeleton holds the card's exact proportions so nothing jumps when it does.
-  bool _ranking = true;
   bool _filtersOpen = false;
-
-  /// List is the default because reasons are the product; the map is the second
-  /// reading of the same filtered set, never a replacement for the cards.
   bool _mapView = false;
+  bool _requestedMatches = false;
 
-  /// Search is local and presentation-only: it never changes the ranking, only
-  /// which of its rows are visible.
+  /// Search is local and presentation-only: it never changes the ranking and
+  /// never calls /matches again. The debounce is for the list of results, not
+  /// for the server.
   final TextEditingController _query = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
+  Timer? _searchTimer;
+  String _appliedQuery = '';
   int _searchTick = 0;
-
-  /// Requests sent from this screen. In-memory, like everything else.
-  final Set<String> _askedHere = <String>{};
 
   @override
   void initState() {
     super.initState();
     _query.addListener(_onQueryChanged);
-    _startRanking();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_requestedMatches) return;
+    _requestedMatches = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppStateScope.read(context).ensureMatches();
+    });
   }
 
   @override
   void dispose() {
+    _searchTimer?.cancel();
     _query
       ..removeListener(_onQueryChanged)
       ..dispose();
@@ -77,7 +84,14 @@ class _MatchesScreenState extends State<MatchesScreen> {
   }
 
   void _onQueryChanged() {
-    setState(() => _searchTick++);
+    _searchTimer?.cancel();
+    _searchTimer = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      setState(() {
+        _appliedQuery = _query.text;
+        _searchTick++;
+      });
+    });
   }
 
   void _setQuery(String value) {
@@ -89,30 +103,67 @@ class _MatchesScreenState extends State<MatchesScreen> {
   }
 
   void _clearSearch() {
+    _searchTimer?.cancel();
     _query.clear();
-    _searchFocus.unfocus();
-  }
-
-  void _startRanking() {
-    setState(() => _ranking = true);
-    Future<void>.delayed(const Duration(milliseconds: 620), () {
-      if (mounted) setState(() => _ranking = false);
+    setState(() {
+      _appliedQuery = '';
+      _searchTick++;
     });
+    _searchFocus.unfocus();
   }
 
   void _toggleFilters() {
     setState(() => _filtersOpen = !_filtersOpen);
   }
 
+  Future<void> _quickRequest(AppState state, MatchResult result) async {
+    final Candidate candidate = result.candidate;
+    final String? subject = state.sharedSubjectFor(candidate);
+    if (subject == null) {
+      _showMessage(
+        'You have no subject in common with ${candidate.name} yet. '
+        'Add one of their subjects to your profile first.',
+      );
+      return;
+    }
+    if (!state.canRequest(candidate)) {
+      _showMessage(
+        state.profileAnswered
+            ? 'There is already an open request with ${candidate.name}.'
+            : 'Finish your five answers before sending a request.',
+      );
+      return;
+    }
+    try {
+      await state.createRequest(
+        candidate: candidate,
+        subject: subject,
+        note: 'Hi ${candidate.name}, I would like to arrange $subject sessions. '
+            'Are you available this week?',
+      );
+      _showMessage('Request sent to ${candidate.name}.');
+    } on ApiException catch (error) {
+      _showMessage(error.message);
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppState state = AppStateScope.of(context);
     final bool student = state.role == Role.student;
-    final List<Candidate> pool = state.pool;
-    final List<MatchResult> ranked = rank(pool, state.profile);
-    final MatchOutcome outcome = applyFilters(ranked, state.filters, state.profile);
-    final List<MatchResult> searched = _search(outcome.results);
-    final String query = _query.text.trim();
+    final List<MatchResult> ranked = state.matches;
+    final List<MatchResult> searched = _search(ranked, _appliedQuery);
+    final String query = _appliedQuery.trim();
+    final Set<String> askedHere = <String>{
+      for (final MatchRequest request in state.requests)
+        if (request.status != RequestStatus.declined) request.counterpartId,
+    };
 
     return TMPage(
       navItems: <TMNavItem>[
@@ -137,8 +188,8 @@ class _MatchesScreenState extends State<MatchesScreen> {
           _RankHeader(
             student: student,
             name: state.profile.name,
-            ranked: ranked.length,
-            pool: pool.length,
+            ranked: state.rankedCount,
+            pool: state.poolSize,
             profileAnswered: state.profileAnswered,
             profileSummary: state.profileSummary,
             onEditAnswers: () => Navigator.of(context).pushNamed(
@@ -164,24 +215,37 @@ class _MatchesScreenState extends State<MatchesScreen> {
               ranked: ranked,
               onRerank: () {
                 setState(() => _filtersOpen = false);
-                _startRanking();
+                state.loadMatches();
               },
               onClose: () => setState(() => _filtersOpen = false),
             ),
           ),
           SizedBox(height: Space.xl),
-          if (outcome.empty != null && !_ranking)
+          if (state.matchesLoading)
+            const _RankingInProgress()
+          else if (state.matchesError != null && ranked.isEmpty)
+            _MatchesError(
+              message: state.matchesError!,
+              onRetry: state.loadMatches,
+            )
+          else if (state.coldStart != null && ranked.isEmpty)
+            _ColdStartState(
+              coldStart: state.coldStart!,
+              onEditAnswers: () => Navigator.of(context).pushNamed(
+                Routes.onboarding,
+                arguments: state.role,
+              ),
+              onRetry: state.loadMatches,
+            )
+          else if (ranked.isEmpty && state.filters.isNarrowed)
             _FilterEmpty(
-              empty: outcome.empty!,
               state: state,
             )
-          else if (_ranking)
-            const _RankingInProgress()
           else if (searched.isEmpty)
             _SearchEmpty(
               query: query,
               ranked: ranked,
-              nearby: _nearbyPeople(searched.isEmpty ? outcome.results : searched),
+              nearby: _nearbyPeople(searched.isEmpty ? ranked : searched),
               subjects: _subjectsIn(ranked),
               searchTick: _searchTick,
               onSubject: _setQuery,
@@ -200,11 +264,8 @@ class _MatchesScreenState extends State<MatchesScreen> {
               query: query,
               mapView: _mapView,
               onMapView: (bool map) => setState(() => _mapView = map),
-              askedHere: _askedHere,
-              onRequest: (MatchResult result) {
-                state.startConversation(result.candidate);
-                setState(() => _askedHere.add(result.candidate.id));
-              },
+              askedHere: askedHere,
+              onRequest: (MatchResult result) => _quickRequest(state, result),
               onOpen: (MatchResult result) => Navigator.of(context).pushNamed(
                 Routes.matchDetail,
                 arguments: result,
@@ -219,8 +280,8 @@ class _MatchesScreenState extends State<MatchesScreen> {
   /// Keeps only rows whose person, subjects or public area answer the query.
   /// All words must land somewhere, so "chem manchester" is an intersection, not
   /// a union. Search never touches the ranking.
-  List<MatchResult> _search(List<MatchResult> results) {
-    final List<String> terms = _query.text
+  List<MatchResult> _search(List<MatchResult> results, String query) {
+    final List<String> terms = query
         .toLowerCase()
         .trim()
         .split(RegExp(r'\s+'))
@@ -238,7 +299,6 @@ class _MatchesScreenState extends State<MatchesScreen> {
         c.styleTags.join(' '),
         c.modeCopy,
         c.location,
-        c.livesIn,
         c.publicPlace?.label ?? '',
       ].join(' ').toLowerCase();
       return terms.every(haystack.contains);
@@ -1284,9 +1344,6 @@ class _Results extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<MatchRequest> inbox =
-        state.role == Role.student ? sampleRequests : sampleReceivedRequests;
-
     final Widget summary = _ResultSummary(
       results: visible,
       total: ranked.length,
@@ -1369,15 +1426,8 @@ class _Results extends StatelessWidget {
                         lead: i == 0,
                         fromProfile: state.profileAnswered,
                         profileSummary: state.profileSummary,
-                        requested: askedHere.contains(visible[i].candidate.id) ||
-                            state.conversations.any((Conversation chat) =>
-                                chat.counterpartId ==
-                                    visible[i].candidate.id &&
-                                chat.status != RequestStatus.declined) ||
-                            inbox.any((MatchRequest r) =>
-                                r.counterpartId ==
-                                    visible[i].candidate.id &&
-                                r.status != RequestStatus.declined),
+                        requested:
+                            askedHere.contains(visible[i].candidate.id),
                         onOpen: () => onOpen(visible[i]),
                         onQuickRequest: () => onRequest(visible[i]),
                       ),
@@ -1494,27 +1544,73 @@ class _RankingInProgress extends StatelessWidget {
   }
 }
 
+class _MatchesError extends StatelessWidget {
+  const _MatchesError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return TMEmptyState(
+      headline: 'The ranking could not load.',
+      body: message,
+      primaryLabel: 'Try again',
+      onPrimary: onRetry,
+    );
+  }
+}
+
+class _ColdStartState extends StatelessWidget {
+  const _ColdStartState({
+    required this.coldStart,
+    required this.onEditAnswers,
+    required this.onRetry,
+  });
+
+  final ColdStart coldStart;
+  final VoidCallback onEditAnswers;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool incomplete = coldStart.reason == 'profile_incomplete';
+    return TMEmptyState(
+      headline: incomplete
+          ? 'A few answers are still missing.'
+          : 'There is nobody to rank yet.',
+      body: coldStart.message,
+      primaryLabel: incomplete ? 'Finish my answers' : 'Try again',
+      onPrimary: incomplete ? onEditAnswers : onRetry,
+      filtersLabel: incomplete && coldStart.missing.isNotEmpty
+          ? 'Still needed'
+          : null,
+      filters: <Widget>[
+        for (final String item in coldStart.missing) TMFilterTag(label: item),
+      ],
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Empty states
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The filters removed everyone. Say which condition did it, and make the way
-/// back one tap.
+/// The filters removed everyone. The server has already applied them, so the
+/// only honest next step is to remove one condition or clear them all.
 class _FilterEmpty extends StatelessWidget {
-  const _FilterEmpty({required this.empty, required this.state});
+  const _FilterEmpty({required this.state});
 
-  final EmptyExplanation empty;
   final AppState state;
 
   @override
   Widget build(BuildContext context) {
     return TMEmptyState(
-      headline: empty.headline,
-      body: empty.body,
-      primaryLabel: empty.adjustLabel,
-      onPrimary: () => state.relaxFilters(empty.relaxed),
-      secondaryLabel: state.filters.isNarrowed ? 'Clear every filter' : null,
-      onSecondary: state.clearFilters,
+      headline: 'Nobody matches every filter.',
+      body: 'The ranking still exists; these conditions have narrowed it to '
+          'nothing. Remove one condition to see the people it is hiding.',
+      primaryLabel: 'Clear every filter',
+      onPrimary: state.clearFilters,
       filtersLabel: 'What is removing them',
       filters: <Widget>[
         if (state.filters.mustBeFreeWhenIAm)

@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Sign in.
 //
-// Same frame as register, so the two screens cannot drift apart. The honest
-// difference: this one offers the demo account, because a reviewer who has to
-// invent an email address to see the product will invent a bad one and then
-// wonder whether the form works.
+// Same frame as register, so the two screens cannot drift apart. The demo
+// account is a real seeded account on the backend: pressing it performs the same
+// POST /auth/login as typing the email and password by hand.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/screens/auth_shell.dart';
 import 'package:tutormatch/state/app_state.dart';
@@ -33,7 +33,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String? _emailError;
   String? _passwordError;
+  String? _error;
   bool _busy = false;
+
+  static const String _demoPassword = 'TutorMatch123!';
 
   @override
   void dispose() {
@@ -42,37 +45,61 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _submit() {
-    final String? emailError = validateEmail(_email.text);
-    final String? passwordError = validatePassword(_password.text, isNew: false);
+  Future<void> _submit({String? email, String? password}) async {
+    final String candidateEmail = email ?? _email.text;
+    final String candidatePassword = password ?? _password.text;
+    final String? emailError = validateEmail(candidateEmail);
+    final String? passwordError =
+        validatePassword(candidatePassword, isNew: false);
     setState(() {
       _emailError = emailError;
       _passwordError = passwordError;
+      _error = null;
     });
     if (emailError != null || passwordError != null) return;
 
     setState(() => _busy = true);
     final AppState state = AppStateScope.read(context);
-    state.role = _role;
-    // There is no account behind the form, so signing in has to land on the
-    // demo profile for the chosen side. Without this a tutor would arrive on
-    // the student profile — including its location — and every tutor-only
-    // field would be missing.
-    state.profile = _role == Role.student ? demoStudentProfile : demoTutorProfile;
-    state.signIn();
-    Future<void>.delayed(const Duration(milliseconds: 520), () {
+    try {
+      final UserAccount user = await state.login(
+        email: candidateEmail.trim(),
+        password: candidatePassword,
+      );
       if (!mounted) return;
+      if (user.role != _role) {
+        state.signOut();
+        setState(() {
+          _error = 'That is a ${user.role.name} account. '
+              'Switch the role above and sign in again.';
+        });
+        return;
+      }
       AuthFlow.complete(context);
-    });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _useDemoAccount() {
-    final AppState state = AppStateScope.read(context);
-    state.role = _role;
-    state.profile = _role == Role.student ? demoStudentProfile : demoTutorProfile;
-    state.profileAnswered = true;
-    state.signIn();
-    AuthFlow.complete(context);
+    final String email = _role == Role.student
+        ? 'maya@tutormatch.local'
+        : 'amara@tutormatch.local';
+    _email.text = email;
+    _password.text = _demoPassword;
+    _submit(email: email, password: _demoPassword);
+  }
+
+  void _googleUnavailable() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Google sign-in is not configured. Use an email account or the seeded demo account.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -81,15 +108,14 @@ class _LoginScreenState extends State<LoginScreen> {
       role: _role,
       onRoleChanged: (Role r) => setState(() => _role = r),
       title: 'Sign in',
-      lede: 'Pick up your list where you left it. In this prototype there is '
-          'nothing to pick up yet — any valid-looking email and a password of '
-          'eight characters will let you through.',
+      lede: 'Pick up your ranked list, your requests and your conversations. '
+          'The account role decides whose list you see.',
       formEyebrow: 'YOUR ACCOUNT',
       formTitle: 'Sign in, and pick up the list.',
       nextSteps: const <String>[
         'Your ranked list and your filters, as you left them.',
         'Any requests you have sent, with their answers.',
-        'Nothing is stored. Signing out is the same as reloading.',
+        'Your conversations and unread messages.',
       ],
       switchPrompt: 'No account yet?',
       switchLabel: 'Create one in two fields',
@@ -105,8 +131,8 @@ class _LoginScreenState extends State<LoginScreen> {
             AuthRoleSwitch(
               role: _role,
               label: 'I am signing in as',
-              reason: 'This decides whose list you see next. It does not change '
-                  'what we ask you, only who gets ranked.',
+              reason: 'The account itself owns its role. This selection chooses '
+                  'the demo account and catches a mismatch before the dashboard.',
               onChanged: (Role r) => setState(() => _role = r),
             ),
             const SizedBox(height: Space.xl),
@@ -114,7 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
               label: 'Continue with Google',
               variant: TMButtonVariant.secondary,
               expand: true,
-              onPressed: _busy ? null : _submit,
+              onPressed: _busy ? null : _googleUnavailable,
             ),
             const SizedBox(height: Space.xl),
             const AuthDivider(label: 'or sign in with an email'),
@@ -136,10 +162,15 @@ class _LoginScreenState extends State<LoginScreen> {
               obscure: true,
               textInputAction: TextInputAction.done,
               error: _passwordError,
-              helper: 'Forgotten it? There is nothing to reset here — no password '
-                  'is being checked against anything.',
               onSubmitted: (_) => _submit(),
             ),
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: Space.md),
+              Text(
+                _error!,
+                style: AppType.bodySmall.tone(AppColors.alert),
+              ),
+            ],
             const SizedBox(height: Space.xl),
             TMButton(
               label: 'Sign in',
@@ -147,15 +178,15 @@ class _LoginScreenState extends State<LoginScreen> {
               busy: _busy,
               busyLabel: 'Finding your list…',
               icon: TMIconName.arrowRight,
-              onPressed: _submit,
+              onPressed: _busy ? null : _submit,
             ),
             const SizedBox(height: Space.xl),
-            const AuthDivider(label: 'or skip the form'),
+            const AuthDivider(label: 'or use a seeded account'),
             const SizedBox(height: Space.lg),
             TMButton(
               label: _role == Role.student
-                  ? 'Open the demo student account'
-                  : 'Open the demo tutor account',
+                  ? 'Open the seeded student account'
+                  : 'Open the seeded tutor account',
               variant: TMButtonVariant.secondary,
               expand: true,
               onPressed: _busy ? null : _useDemoAccount,
@@ -163,9 +194,10 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: Space.md),
             Text(
               _role == Role.student
-                  ? 'Maya Chen, Year 12 — calculus and physics, weekday evenings, '
-                      'up to \$${demoStudentProfile.budget} an hour.'
-                  : 'Amara Okonkwo — calculus and statistics, online, weekday '
+                  ? 'maya@tutormatch.local · $_demoPassword\n'
+                      'Maya Chen, Year 12 — calculus and physics, weekday evenings.'
+                  : 'amara@tutormatch.local · $_demoPassword\n'
+                      'Amara Okonkwo — calculus and statistics, online, weekday '
                       'evenings and Saturday mornings.',
               style: AppType.bodySmall.quieter,
             ),

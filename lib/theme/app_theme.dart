@@ -90,9 +90,9 @@ abstract final class AppColors {
   static const Color declined = Color(0xFF5F6D66); // = inkMuted, on purpose
   static const Color declinedWash = Color(0xFFE9EDE9);
 
-  // Identity fills for people with "a picture" in the sample data. These never
-  // mean accepted, pending or declined. Initials sit on them in [onAccent],
-  // and each clears 6:1 against it.
+  // Identity fills for initials avatars. These never mean accepted, pending or
+  // declined. Initials sit on them in [onAccent], and each clears 6:1 against
+  // it.
   static const Color avatarSlate = Color(0xFF3D5A5F);
   static const Color avatarPlum = Color(0xFF5B4656);
   static const Color avatarClay = Color(0xFF8A5A3B);

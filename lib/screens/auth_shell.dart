@@ -10,8 +10,8 @@
 // the fields. The title and the consequence stay; the three steps follow the
 // form as a short receipt.
 //
-// Both screens are honest about being a prototype: nothing is created, nothing
-// is stored, and anything that looks like a valid email will work.
+// Both screens talk to the TutorMatch server: accounts are created there, the
+// password is hashed there, and only the token pair is kept in browser storage.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -289,8 +289,8 @@ class _AuthIntro extends StatelessWidget {
                 ),
                 Expanded(
                   child: Text(
-                    'Interface prototype. No account is created, no email is '
-                    'sent, and nothing typed here leaves the page.',
+                    'This form talks to the TutorMatch server. Your password is '
+                    'hashed there and never stored in the browser.',
                     style: AppType.bodySmall.copyWith(
                       color: AppColors.onInkFaint,
                       height: 1.5,

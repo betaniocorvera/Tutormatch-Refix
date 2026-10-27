@@ -26,7 +26,7 @@ import 'package:flutter_map/flutter_map.dart';
 // dependency for one value type.
 // ignore: depend_on_referenced_packages
 import 'package:latlong2/latlong.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 import 'package:tutormatch/widgets/tm_icon.dart';
 

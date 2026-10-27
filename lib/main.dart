@@ -1,17 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // TutorMatch A.I. — entry point.
 //
-// Interface only. There is no backend, no database, no network call and no real
-// K-nearest-neighbours pass; every tutor, student, score and review comes from
-// lib/data/mock_data.dart. Google sign-in and email/password both simply move to
-// the next screen, which is the entire behaviour they are asked to have.
-//
-// Routing is one switch in [onGenerateRoute]. No router package: there are ten
-// screens and they all take plain arguments.
+// The app talks to the FastAPI service in backend/. The session is restored from
+// the refresh token before the first protected route is built, so a reload does
+// not flash the dashboard and then throw the person out. Every route still goes
+// through one switch; there is no router package.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/screens/chat_screen.dart';
 import 'package:tutormatch/screens/landing_screen.dart';
 import 'package:tutormatch/screens/login_screen.dart';
@@ -28,8 +25,6 @@ import 'package:tutormatch/theme/app_theme.dart';
 
 void main() => runApp(const TutorMatchApp());
 
-/// Route names, in one place so a typo is a compile error rather than a blank
-/// screen. Arguments are the only state passed between pages.
 abstract final class Routes {
   static const String landing = '/';
   static const String register = '/register';
@@ -45,45 +40,68 @@ abstract final class Routes {
 }
 
 class TutorMatchApp extends StatefulWidget {
-  const TutorMatchApp({super.key});
+  const TutorMatchApp({this.state, super.key});
+
+  /// Tests inject a state backed by a mock HTTP client. Production passes null.
+  final AppState? state;
 
   @override
   State<TutorMatchApp> createState() => _TutorMatchAppState();
 }
 
 class _TutorMatchAppState extends State<TutorMatchApp> {
-  final AppState _state = AppState();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  late final AppState _state = widget.state ?? AppState();
+  late bool _wasSignedIn = _state.isSignedIn;
+
+  @override
+  void initState() {
+    super.initState();
+    _state.addListener(_onStateChanged);
+  }
 
   @override
   void dispose() {
-    _state.dispose();
+    _state.removeListener(_onStateChanged);
+    if (widget.state == null) _state.dispose();
     super.dispose();
+  }
+
+  void _onStateChanged() {
+    if (_state.isReady && _wasSignedIn && !_state.isSignedIn) {
+      _navigatorKey.currentState?.pushNamedAndRemoveUntil(
+        Routes.landing,
+        (Route<dynamic> route) => false,
+      );
+    }
+    _wasSignedIn = _state.isSignedIn;
   }
 
   @override
   Widget build(BuildContext context) {
     return AppStateScope(
       notifier: _state,
-      child: MaterialApp(
-        title: 'TutorMatch A.I.',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        // No fixed initialRoute: on the web this lets /#/matches and /#/chat
-        // reach the guard instead of being replaced by the landing page.
-        onGenerateRoute: _route,
-        // Keyboard order follows reading order, which matters most on the
-        // onboarding form where every answer is a control.
-        builder: (BuildContext context, Widget? child) => FocusTraversalGroup(
-          policy: ReadingOrderTraversalPolicy(),
-          child: child ?? const SizedBox.shrink(),
-        ),
+      child: AnimatedBuilder(
+        animation: _state,
+        builder: (BuildContext context, Widget? child) {
+          if (!_state.isReady) return const _BootstrapScreen();
+          return MaterialApp(
+            title: 'TutorMatch A.I.',
+            debugShowCheckedModeBanner: false,
+            navigatorKey: _navigatorKey,
+            theme: AppTheme.light(),
+            onGenerateRoute: _route,
+            builder: (BuildContext context, Widget? child) =>
+                FocusTraversalGroup(
+              policy: ReadingOrderTraversalPolicy(),
+              child: child ?? const SizedBox.shrink(),
+            ),
+          );
+        },
       ),
     );
   }
 
-  /// Every dashboard route. Landing, Login and Register are deliberately not
-  /// in this set; onboarding is protected because it is the second half of
-  /// registration and must not be reachable as a stranger.
   static bool _isProtected(String? name) =>
       name == Routes.matches ||
       name == Routes.matchDetail ||
@@ -97,9 +115,6 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
   static bool _isAuthEntry(String? name) =>
       name == Routes.login || name == Routes.register;
 
-  /// The only route gate in the app. Screens never check [AppState.isSignedIn]
-  /// themselves: a named route either builds its page or is replaced by Login
-  /// here, which is also what makes Back and a typed URL take the same path.
   Route<void> _route(RouteSettings settings) {
     final String? name = settings.name;
     final Object? args = settings.arguments;
@@ -108,9 +123,6 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
         TMTransitions.page<void>(child, name: name ?? settings.name);
 
     if (!_state.isSignedIn && _isProtected(name)) {
-      // Remember where the visitor was going, including a match result or a
-      // conversation id. Onboarding is a registration step, not a destination,
-      // so it is redirected without being remembered.
       if (name != Routes.onboarding) {
         _state.rememberDestination(name!, args);
       }
@@ -121,8 +133,6 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
     }
 
     if (_state.isSignedIn && _isAuthEntry(name)) {
-      // A signed-in visitor has no business on the auth forms, and a stale
-      // destination must not send them back to one after this.
       _state.clearPendingDestination();
       return build(const MatchesScreen(), name: Routes.matches);
     }
@@ -135,7 +145,7 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
         final Role role = args is Role ? args : Role.student;
         return build(LoginScreen(initialRole: role));
       case Routes.onboarding:
-        final Role role = args is Role ? args : Role.student;
+        final Role role = args is Role ? args : _state.role;
         return build(OnboardingScreen(role: role));
       case Routes.matches:
         return build(const MatchesScreen());
@@ -147,7 +157,6 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
       case Routes.messages:
         return build(const MessagesScreen());
       case Routes.chat:
-        // A conversation id, not a conversation: the chat reads the live one.
         final Object? id = args;
         if (id is String) return build(ChatScreen(conversationId: id));
         return build(const MessagesScreen());
@@ -162,13 +171,51 @@ class _TutorMatchAppState extends State<TutorMatchApp> {
   }
 }
 
-/// The two navigation moves both sides of the auth boundary share.
+class _BootstrapScreen extends StatelessWidget {
+  const _BootstrapScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'TutorMatch A.I.',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
+      home: Scaffold(
+        backgroundColor: AppColors.paper,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text('TutorMatch', style: AppType.titleLarge),
+              const SizedBox(height: Space.sm),
+              Text(
+                'Restoring your session',
+                style: AppType.bodySmall.quieter,
+              ),
+              const SizedBox(height: Space.xl),
+              const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 abstract final class AuthFlow {
-  /// Called after a successful sign-in or after the five answers at the end of
-  /// registration. Returns to the page the visitor originally asked for, or the
-  /// ranked list when they started at Login/Register directly.
   static void complete(BuildContext context) {
     final AppState state = AppStateScope.read(context);
+    if (!state.profileAnswered) {
+      Navigator.of(context).pushReplacementNamed(
+        Routes.onboarding,
+        arguments: state.role,
+      );
+      return;
+    }
     final PendingDestination destination = state.takePendingDestination() ??
         const PendingDestination(Routes.matches);
     Navigator.of(context).pushNamedAndRemoveUntil(
@@ -178,9 +225,6 @@ abstract final class AuthFlow {
     );
   }
 
-  /// Clear the session before replacing the whole stack, so neither a pop nor
-  /// browser Back can reveal a dashboard route retained from the signed-in
-  /// session.
   static void signOut(BuildContext context) {
     AppStateScope.read(context).signOut();
     Navigator.of(context).pushNamedAndRemoveUntil(

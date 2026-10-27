@@ -13,7 +13,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
-import 'package:tutormatch/data/mock_data.dart';
+import 'package:tutormatch/data/api_client.dart';
+import 'package:tutormatch/data/catalog.dart';
+import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/main.dart';
 import 'package:tutormatch/state/app_state.dart';
 import 'package:tutormatch/theme/app_theme.dart';
@@ -42,8 +44,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int _rate = 45;
   String? _goal;
   bool _busy = false;
+  bool _prefilled = false;
+  String? _error;
 
   bool get _isStudent => widget.role == Role.student;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_prefilled) return;
+    _prefilled = true;
+    final Profile profile = AppStateScope.read(context).profile;
+    if (profile.subjects.isNotEmpty) _subjects.addAll(profile.subjects);
+    if (profile.style.isNotEmpty) _style = profile.style;
+    if (profile.availability.any((bool cell) => cell)) {
+      _week = List<bool>.of(profile.availability);
+    }
+    _mode = profile.mode;
+    if (profile.budget > 0) _rate = profile.budget;
+    if (profile.goal.isNotEmpty) _goal = profile.goal;
+  }
 
   List<String> get _stepTitles => _isStudent
       ? const <String>['Subjects', 'How you learn', 'Your week', 'Where and how much', 'What you want out of it']
@@ -72,42 +92,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   bool get _canContinue => _blocker == null;
 
-  void _next() {
+  Future<void> _next() async {
     if (!_canContinue) return;
     if (_step < 4) {
       setState(() => _step++);
       return;
     }
-    setState(() => _busy = true);
-    final AppState state = AppStateScope.read(context);
-    state.role = widget.role;
-    state.profile = Profile(
-      role: widget.role,
-      name: state.profile.name,
-      subjects: _subjects.toList(),
-      style: _style!,
-      mode: _mode,
-      budget: _rate,
-      availability: _week,
-      goal: _goal!,
-    );
-    // This is the one moment the "based on your profile" tag is honest: the
-    // ranking below was produced from answers given seconds ago.
-    state.profileAnswered = true;
-    state.clearFilters();
-    Future<void>.delayed(const Duration(milliseconds: 620), () {
-      if (!mounted) return;
-      AuthFlow.complete(context);
+    setState(() {
+      _busy = true;
+      _error = null;
     });
-  }
-
-  void _useDemo() {
     final AppState state = AppStateScope.read(context);
-    state.role = widget.role;
-    state.profile = _isStudent ? demoStudentProfile : demoTutorProfile;
-    state.profileAnswered = true;
-    state.clearFilters();
-    AuthFlow.complete(context);
+    try {
+      await state.updateProfile(state.profile.copyWith(
+        role: widget.role,
+        subjects: _subjects.toList(),
+        style: _style!,
+        mode: _mode,
+        budget: _rate,
+        availability: List<bool>.of(_week),
+        goal: _goal!,
+      ));
+      if (!mounted) return;
+      state.clearFilters();
+      AuthFlow.complete(context);
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -119,8 +133,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       dimensions: _stepDimensions,
       current: _step,
       onJump: (int i) => setState(() => _step = i),
-      onDemo: _useDemo,
-      role: widget.role,
       compact: !wide,
     );
 
@@ -132,10 +144,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       blocker: _blocker,
       busy: _busy,
       last: _step == 4,
+      error: _error,
       role: widget.role,
       onBack: _step == 0 ? null : () => setState(() => _step--),
       onNext: _canContinue ? _next : null,
-      child: _control(),
+      child: _control(AppStateScope.of(context)),
     );
 
     // One shared-axis move per step: the question leaves towards the left and
@@ -201,24 +214,32 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _control() {
+  Widget _control(AppState state) {
     switch (_step) {
       case 0:
+        final List<String> options = state.subjects;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            TMTagPicker(
-              options: OnboardingOptions.subjects,
-              selected: _subjects,
-              max: 4,
-              onToggle: (String s) => setState(() {
-                if (_subjects.contains(s)) {
-                  _subjects.remove(s);
-                } else if (_subjects.length < 4) {
-                  _subjects.add(s);
-                }
-              }),
-            ),
+            if (options.isEmpty)
+              Text(
+                state.catalogError ??
+                    'The subject catalogue has not loaded. Check that the API is running.',
+                style: AppType.bodySmall.tone(AppColors.alert),
+              )
+            else
+              TMTagPicker(
+                options: options,
+                selected: _subjects,
+                max: 4,
+                onToggle: (String s) => setState(() {
+                  if (_subjects.contains(s)) {
+                    _subjects.remove(s);
+                  } else if (_subjects.length < 4) {
+                    _subjects.add(s);
+                  }
+                }),
+              ),
             const SizedBox(height: Space.lg),
             Text(
               _subjects.length >= 4
@@ -304,8 +325,6 @@ class _Rail extends StatelessWidget {
     required this.dimensions,
     required this.current,
     required this.onJump,
-    required this.onDemo,
-    required this.role,
     required this.compact,
   });
 
@@ -313,8 +332,6 @@ class _Rail extends StatelessWidget {
   final List<String> dimensions;
   final int current;
   final ValueChanged<int> onJump;
-  final VoidCallback onDemo;
-  final Role role;
   final bool compact;
 
   @override
@@ -341,33 +358,17 @@ class _Rail extends StatelessWidget {
         SizedBox(
           width: TMLayout.railWidth - 20,
           child: Text(
-            'Nothing on this form is saved. Reload the page and every answer is '
-            'gone — there is no account holding them.',
+            'Your answers are saved to your account. You can change them later '
+            'from the profile page; the ranking will use the new answers.',
             style: AppType.bodySmall.quieter,
           ),
         ),
         const SizedBox(height: Space.lg),
-        Text(
-          'Not ready to answer? Start from a sample profile and change it later.',
-          style: AppType.bodySmall.quieter,
-        ),
-        const SizedBox(height: Space.sm),
-        TMButton(
-          label: 'Use the demo profile',
-          variant: TMButtonVariant.secondary,
-          icon: TMIconName.arrowRight,
-          minHeight: Hit.min,
-          onPressed: onDemo,
-        ),
-        const SizedBox(height: Space.md),
         SizedBox(
           width: TMLayout.railWidth - 20,
           child: Text(
-            role == Role.student
-                ? 'Maya Chen, Year 12: calculus, physics and algebra, weekday '
-                    'evenings, online or in person, up to \$50 an hour.'
-                : 'Amara Okonkwo: calculus and statistics, online, weekday evenings '
-                    'and Saturday mornings, \$46 an hour.',
+            'The five answers are the whole ranking input. Nothing decorative '
+            'is collected here.',
             style: AppType.bodySmall.quieter,
           ),
         ),
@@ -466,6 +467,7 @@ class _Question extends StatelessWidget {
     required this.blocker,
     required this.busy,
     required this.last,
+    required this.error,
     required this.role,
     required this.onBack,
     required this.onNext,
@@ -479,6 +481,7 @@ class _Question extends StatelessWidget {
   final String? blocker;
   final bool busy;
   final bool last;
+  final String? error;
   final Role role;
   final VoidCallback? onBack;
   final VoidCallback? onNext;
@@ -522,7 +525,7 @@ class _Question extends StatelessWidget {
               label: last ? 'See my matches' : 'Continue',
               icon: TMIconName.arrowRight,
               busy: busy,
-              busyLabel: 'Ranking everyone against your answers…',
+              busyLabel: 'Saving your answers…',
               onPressed: onNext,
             ),
             if (onBack != null)
@@ -539,6 +542,14 @@ class _Question extends StatelessWidget {
                 child: Text(
                   blocker!,
                   style: AppType.bodySmall.quieter,
+                ),
+              ),
+            if (error != null)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: Text(
+                  error!,
+                  style: AppType.bodySmall.tone(AppColors.alert),
                 ),
               ),
           ],

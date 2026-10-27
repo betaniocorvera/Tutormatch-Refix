@@ -1,5 +1,5 @@
 name: tutormatch
-description: "TutorMatch A.I. — a tutor/student matching and recommender UI (K-Nearest Neighbours). Interface only: all data is sample data."
+description: "TutorMatch A.I. — a tutor/student matching and messaging client backed by FastAPI and K-Nearest Neighbours."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -36,10 +36,11 @@ dependencies:
   cupertino_icons: ^1.0.8
   image_picker: ^1.2.4
   flutter_map: ^8.3.2
+  http: ^1.6.0
+  shared_preferences: ^2.5.6
   # Every face is bundled below. Shipping them is smaller than the packages
-  # that fetch them, they render on the first frame instead of after a round
-  # trip to fonts.gstatic.com, and the interface works with no network at all —
-  # which matters for a prototype that is often opened on a train.
+  # that fetch them, and they render on the first frame instead of after a
+  # round trip to fonts.gstatic.com. API data still needs the backend.
 
 dev_dependencies:
   flutter_test:

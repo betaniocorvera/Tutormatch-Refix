@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,6 +25,30 @@ _ALLOWED_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 _EXAMPLE_JWT_SECRET = (
     "replace-with-a-long-random-string-at-least-32-characters"
 )
+_ALLOWED_DATABASE_SSL_MODES = frozenset(
+    {"", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+)
+
+
+def _normalize_database_url(name: str, value: str) -> str:
+    """Return a psycopg 3 SQLAlchemy URL, or an empty string.
+
+    ``postgresql://`` is accepted as a convenience and rewritten to the
+    explicitly installed psycopg 3 driver. This prevents SQLAlchemy from
+    silently looking for psycopg2.
+    """
+
+    cleaned = value.strip()
+    if not cleaned:
+        return ""
+    if cleaned.startswith("postgresql://"):
+        cleaned = "postgresql+psycopg://" + cleaned[len("postgresql://") :]
+    if not cleaned.startswith("postgresql+psycopg://"):
+        raise ValueError(
+            f"{name} must be a PostgreSQL URL using psycopg 3 "
+            "(postgresql+psycopg://...)"
+        )
+    return cleaned
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -76,6 +100,13 @@ class Settings:
     login_rate_limit_window_seconds: int = 900
     cors_origins: tuple[str, ...] = ("http://localhost:8080",)
     secret_is_ephemeral: bool = False
+    database_url: str = field(default="", repr=False)
+    test_database_url: str = field(default="", repr=False)
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
+    database_pool_timeout_seconds: float = 30.0
+    database_echo: bool = False
+    database_ssl_mode: str = ""
 
     def __post_init__(self) -> None:
         env = self.app_env.strip().lower()
@@ -101,6 +132,35 @@ class Settings:
                 raise ValueError("CORS_ORIGINS entries must be http(s) origins")
             if origin.endswith("/"):
                 raise ValueError("CORS_ORIGINS entries must not end with /")
+
+        object.__setattr__(
+            self,
+            "database_url",
+            _normalize_database_url("DATABASE_URL", self.database_url),
+        )
+        object.__setattr__(
+            self,
+            "test_database_url",
+            _normalize_database_url(
+                "TEST_DATABASE_URL",
+                self.test_database_url,
+            ),
+        )
+        if self.database_pool_size <= 0:
+            raise ValueError("DATABASE_POOL_SIZE must be positive")
+        if self.database_max_overflow < 0:
+            raise ValueError("DATABASE_MAX_OVERFLOW cannot be negative")
+        if self.database_pool_timeout_seconds <= 0:
+            raise ValueError(
+                "DATABASE_POOL_TIMEOUT_SECONDS must be positive"
+            )
+        ssl_mode = self.database_ssl_mode.strip().lower()
+        if ssl_mode not in _ALLOWED_DATABASE_SSL_MODES:
+            raise ValueError(
+                "DATABASE_SSL_MODE must be blank or one of "
+                "disable, allow, prefer, require, verify-ca, verify-full"
+            )
+        object.__setattr__(self, "database_ssl_mode", ssl_mode)
 
         secret = self.jwt_secret
         if not secret:
@@ -178,4 +238,13 @@ class Settings:
                 "LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900
             ),
             cors_origins=cors_origins,
+            database_url=os.getenv("DATABASE_URL", ""),
+            test_database_url=os.getenv("TEST_DATABASE_URL", ""),
+            database_pool_size=_env_int("DATABASE_POOL_SIZE", 5),
+            database_max_overflow=_env_int("DATABASE_MAX_OVERFLOW", 10),
+            database_pool_timeout_seconds=_env_float(
+                "DATABASE_POOL_TIMEOUT_SECONDS", 30.0
+            ),
+            database_echo=_env_bool("DATABASE_ECHO", False),
+            database_ssl_mode=os.getenv("DATABASE_SSL_MODE", ""),
         )

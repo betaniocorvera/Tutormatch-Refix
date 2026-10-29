@@ -38,3 +38,52 @@ def test_production_rejects_the_example_jwt_secret() -> None:
                 "replace-with-a-long-random-string-at-least-32-characters"
             ),
         )
+
+
+def test_from_env_reads_database_settings(monkeypatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", "s" * 64)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://user:pass@localhost:5432/tutormatch",
+    )
+    monkeypatch.setenv(
+        "TEST_DATABASE_URL",
+        "postgresql+psycopg://user:pass@localhost:5432/tutormatch_test",
+    )
+    monkeypatch.setenv("DATABASE_POOL_SIZE", "7")
+    monkeypatch.setenv("DATABASE_MAX_OVERFLOW", "3")
+    monkeypatch.setenv("DATABASE_POOL_TIMEOUT_SECONDS", "12.5")
+    monkeypatch.setenv("DATABASE_ECHO", "true")
+    monkeypatch.setenv("DATABASE_SSL_MODE", "require")
+
+    settings = Settings.from_env()
+
+    assert settings.database_url == (
+        "postgresql+psycopg://user:pass@localhost:5432/tutormatch"
+    )
+    assert settings.test_database_url == (
+        "postgresql+psycopg://user:pass@localhost:5432/tutormatch_test"
+    )
+    assert settings.database_pool_size == 7
+    assert settings.database_max_overflow == 3
+    assert settings.database_pool_timeout_seconds == 12.5
+    assert settings.database_echo is True
+    assert settings.database_ssl_mode == "require"
+
+
+def test_database_url_must_use_postgresql() -> None:
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        Settings(
+            jwt_secret="s" * 64,
+            database_url="sqlite:///tutormatch.db",
+        )
+
+
+def test_database_pool_size_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="DATABASE_POOL_SIZE"):
+        Settings(jwt_secret="s" * 64, database_pool_size=0)
+
+
+def test_database_ssl_mode_must_be_known() -> None:
+    with pytest.raises(ValueError, match="DATABASE_SSL_MODE"):
+        Settings(jwt_secret="s" * 64, database_ssl_mode="sometimes")

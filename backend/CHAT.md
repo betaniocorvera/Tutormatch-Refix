@@ -102,7 +102,8 @@ oldest loaded sequence to page backwards. When a WebSocket is unavailable, poll
 
 Images and uploaded voice notes expose a private `media_url`. Fetching it
 requires an access token and participant membership. Media is held in memory by
-default; with `PERSIST_TO_FILE=true` it is written under `UPLOAD_DIR/chat`.
+default; with `PERSIST_TO_FILE=true` or `STORAGE_BACKEND=postgres` it is written
+under `UPLOAD_DIR/chat`.
 
 ## Read receipts and unread counts
 
@@ -170,10 +171,12 @@ duration 0; the maximum is 3600 seconds. The event type is `call_logged`.
 
 ## Persistence
 
-When `PERSIST_TO_FILE=true`, the JSON snapshot includes the `conversations`
-repository: request state, messages, events, and read cursors. Chat media is
-written under `UPLOAD_DIR/chat` with hashed filenames. Without persistence,
-requests, messages, events, and media reset on restart.
+With `PERSIST_TO_FILE=true`, the JSON snapshot includes the `conversations`
+repository: request state, messages, events, and read cursors. With
+`STORAGE_BACKEND=postgres`, those records live in the PostgreSQL tables and
+survive a restart. Chat media is written under `UPLOAD_DIR/chat` with hashed
+filenames in either persistent mode. Without persistence, requests, messages,
+events, and media reset on restart.
 
 ## Status codes
 

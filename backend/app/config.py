@@ -93,6 +93,7 @@ class Settings:
     access_token_minutes: int = 15
     refresh_token_days: int = 7
     persist_to_file: bool = False
+    storage_backend: str = "memory"
     store_path: Path = DEFAULT_STORE_PATH
     upload_path: Path = DEFAULT_UPLOAD_PATH
     snapshot_debounce_seconds: float = 0.5
@@ -146,6 +147,21 @@ class Settings:
                 self.test_database_url,
             ),
         )
+        storage_backend = self.storage_backend.strip().lower()
+        if storage_backend not in {"memory", "postgres"}:
+            raise ValueError(
+                "STORAGE_BACKEND must be memory or postgres"
+            )
+        object.__setattr__(self, "storage_backend", storage_backend)
+        if storage_backend == "postgres" and not self.database_url:
+            raise ValueError(
+                "DATABASE_URL is required when STORAGE_BACKEND=postgres"
+            )
+        if storage_backend == "postgres" and self.persist_to_file:
+            raise ValueError(
+                "PERSIST_TO_FILE is only supported with "
+                "STORAGE_BACKEND=memory"
+            )
         if self.database_pool_size <= 0:
             raise ValueError("DATABASE_POOL_SIZE must be positive")
         if self.database_max_overflow < 0:
@@ -228,6 +244,7 @@ class Settings:
             access_token_minutes=_env_int("ACCESS_TOKEN_MINUTES", 15),
             refresh_token_days=_env_int("REFRESH_TOKEN_DAYS", 7),
             persist_to_file=_env_bool("PERSIST_TO_FILE", False),
+            storage_backend=os.getenv("STORAGE_BACKEND", "memory"),
             store_path=store_path,
             upload_path=upload_path,
             snapshot_debounce_seconds=_env_float(

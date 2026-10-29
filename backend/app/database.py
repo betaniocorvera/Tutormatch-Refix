@@ -1,9 +1,9 @@
 """PostgreSQL engine, session factory, and transaction boundary.
 
-The application still uses the in-memory repositories until the SQL
-repositories are wired in a later phase. This module provides the database
-plumbing they will use: one engine per process, a session factory, a small
-unit of work, and a connection check for readiness probes.
+The application uses the in-memory repositories by default and can switch to
+the SQL repositories with ``STORAGE_BACKEND=postgres``. This module provides the
+shared engine, a session factory, a small unit of work, and a connection check
+for readiness probes.
 """
 
 from __future__ import annotations

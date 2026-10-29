@@ -1,8 +1,8 @@
 """Repository contracts.
 
-The service layer depends only on these interfaces. Swapping the in-memory
-implementations for a PostgreSQL-backed implementation later should not require
-changes to auth or route code.
+The service layer depends only on these interfaces. The in-memory and
+PostgreSQL implementations satisfy the same contracts, so auth, profile,
+matching, and chat code do not need to know which storage backend is active.
 """
 
 from __future__ import annotations

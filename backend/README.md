@@ -15,12 +15,17 @@ events, WebSocket push, and a polling fallback. Phase 5 connects the Flutter
 client to this API: repository-backed state, real auth restore and 401 logout,
 profile and photo flows, server-side match filters, requests, polling chat, and
 the Flutter web development CORS origin. Phase 6 adds the confirmed,
-development-only demo seed and the final setup/reset documentation.
+development-only demo seed and the final setup/reset documentation. Phase 7
+adds optional PostgreSQL persistence through SQLAlchemy, psycopg 3, and Alembic
+while keeping the in-memory repositories as the default for local work and
+tests.
 
-Data lives in memory. Set `PERSIST_TO_FILE=true` to keep a debounced, atomic JSON
-snapshot at `data/store.json`; that snapshot includes users, profiles, refresh
-sessions, requests, conversations, messages, events, and read cursors. Without
-persistence, all data resets on restart.
+Data lives in memory by default. Set `PERSIST_TO_FILE=true` to keep a debounced,
+atomic JSON snapshot at `data/store.json`; that snapshot includes users,
+profiles, refresh sessions, requests, conversations, messages, events, and read
+cursors. For a real deployment, set `STORAGE_BACKEND=postgres` and provide a
+`DATABASE_URL`; the same repositories then read and write PostgreSQL. Without
+either option, all data resets on restart.
 
 ## Setup (Windows PowerShell)
 
@@ -36,6 +41,46 @@ Python 3.11 or newer is required. The app can start without `JWT_SECRET` in
 development: it generates an ephemeral secret and logs a warning, but all tokens
 become invalid on restart. Production (`APP_ENV=production`) refuses to start
 without a real secret.
+
+## PostgreSQL storage
+
+The default `STORAGE_BACKEND=memory` keeps the existing zero-dependency demo
+setup and the fast unit tests. To use PostgreSQL:
+
+1. Create a database and a role that can create tables.
+2. Put a psycopg 3 URL in `backend/.env`:
+
+   ```dotenv
+   STORAGE_BACKEND=postgres
+   DATABASE_URL=postgresql+psycopg://tutormatch:change-me@localhost:5432/tutormatch
+   ```
+
+   A plain `postgresql://` URL is also accepted and rewritten to the installed
+   psycopg 3 driver.
+
+3. Apply the schema from `backend`:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m alembic upgrade head
+   ```
+
+4. Start the API normally. The app checks the database connection during
+   startup. `PERSIST_TO_FILE` is only for the in-memory backend; enabling both it
+   and `STORAGE_BACKEND=postgres` is rejected. Profile photos and chat attachments
+   are written under `UPLOAD_DIR` in PostgreSQL mode so they survive a restart.
+
+Matching still runs in Python with scikit-learn; PostgreSQL stores the source
+data but the KNN ranking is not moved into the database and `pgvector` is not
+required.
+
+The integration tests use `TEST_DATABASE_URL` and are skipped when it is not
+set. Point it at a dedicated test database because the tests create and drop
+the TutorMatch tables:
+
+```powershell
+$env:TEST_DATABASE_URL="postgresql+psycopg://tutormatch:change-me@localhost:5432/tutormatch_test"
+.\.venv\Scripts\python.exe -m pytest tests\test_sql_repositories.py -q
+```
 
 ## Run
 
@@ -66,10 +111,9 @@ an unattended run:
 | `maya@tutormatch.dev` | student | `TutorMatch123!` |
 | `amara@tutormatch.dev` | tutor | `TutorMatch123!` |
 
-The seed is HTTP-based because the backend is in memory: a separate process
-cannot write into the running server's store. It checks `/health`, logs in
-existing demo accounts, registers missing ones, and PUTs complete profiles. It
-is idempotent and safe to rerun.
+The seed is HTTP-based so it works with both the in-memory and PostgreSQL
+backends: it checks `/health`, logs in existing demo accounts, registers missing
+ones, and PUTs complete profiles. It is idempotent and safe to rerun.
 
 Safety rules:
 
@@ -80,9 +124,10 @@ Safety rules:
 - If an email already exists with a different password or role, it stops with a
   clear message instead of overwriting the account.
 
-The default `PERSIST_TO_FILE=false` store disappears on restart; rerun the seed
-after starting the backend again. With persistence enabled, the seeded data is
-part of the snapshot and survives a restart.
+The default in-memory store disappears on restart; rerun the seed after starting
+the backend again. With `PERSIST_TO_FILE=true` the seeded data is part of the
+JSON snapshot, and with `STORAGE_BACKEND=postgres` it is stored in PostgreSQL;
+both survive a restart.
 
 ## Flutter web client
 
@@ -109,6 +154,9 @@ the browser must be opened at the exact allowed origin.
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+PostgreSQL integration tests are skipped unless `TEST_DATABASE_URL` is set; see
+the PostgreSQL storage section above for the dedicated test database command.
 
 The matching evaluation is included in the suite. Run just that check with:
 
@@ -280,14 +328,14 @@ animation, EXIF-oriented, stripped of metadata, and re-encoded as JPEG before
 storage. The upload limit is 5 MB; the output is capped at 1024 px on its longest
 side.
 
-Photo bytes live behind a `PhotoStorage` interface. With
-`PERSIST_TO_FILE=false` they are held in memory and reset on restart. With
-`PERSIST_TO_FILE=true` they are written to `UPLOAD_DIR` (default
-`data/uploads`) and survive a restart. Files are named from a hash of the user id,
-and the directory is gitignored.
+Photo bytes live behind a `PhotoStorage` interface. With the default in-memory
+store they are held in memory and reset on restart. With `PERSIST_TO_FILE=true`
+or `STORAGE_BACKEND=postgres` they are written to `UPLOAD_DIR` (default
+`data/uploads`) and survive a restart. Files are named from a hash of the user
+id, and the directory is gitignored.
 
 Chat images and uploaded voice notes use a separate `ChatMediaStorage` interface.
-With persistence enabled they live under `UPLOAD_DIR/chat`, also under hashed
+With local media enabled they live under `UPLOAD_DIR/chat`, also under hashed
 filenames. Chat media is private to the two participants; there is no public URL.
 
 `data/store.json` contains password hashes, refresh sessions, and conversation

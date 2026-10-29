@@ -371,9 +371,9 @@ cd backend
 
 ## Current limits
 
-- Matching uses in-memory repositories. Swapping in PostgreSQL means
-  implementing the existing repository interfaces; the engine itself does not
-  know where profiles came from.
+- Matching reads through the repository interfaces. The in-memory and PostgreSQL
+  implementations provide the same profiles; the engine itself does not know
+  where they came from, and the KNN ranking stays in Python.
 - There is no rating or review data in the backend yet. The Flutter prototype's
   sample ratings, review counts, style tags, and headlines are not fabricated
   by the matching endpoint; Phase 5 should render the stored public fields or

@@ -5,8 +5,7 @@ Revises:
 Create Date: 2026-10-29 12:38:22.950193
 
 This is the complete PostgreSQL foundation for the existing Pydantic models.
-It intentionally creates the tables, constraints, and indexes only; wiring the
-application to SQL repositories happens in a later phase.
+It creates the tables, constraints, and indexes used by the SQL repositories.
 """
 
 from typing import Sequence, Union

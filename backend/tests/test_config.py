@@ -87,3 +87,45 @@ def test_database_pool_size_must_be_positive() -> None:
 def test_database_ssl_mode_must_be_known() -> None:
     with pytest.raises(ValueError, match="DATABASE_SSL_MODE"):
         Settings(jwt_secret="s" * 64, database_ssl_mode="sometimes")
+
+
+def test_storage_backend_defaults_to_memory() -> None:
+    settings = Settings(jwt_secret="s" * 64)
+
+    assert settings.storage_backend == "memory"
+
+
+def test_postgres_storage_requires_database_url() -> None:
+    with pytest.raises(ValueError, match="STORAGE_BACKEND=postgres"):
+        Settings(jwt_secret="s" * 64, storage_backend="postgres")
+
+
+def test_postgres_storage_rejects_json_snapshots() -> None:
+    with pytest.raises(ValueError, match="PERSIST_TO_FILE"):
+        Settings(
+            jwt_secret="s" * 64,
+            storage_backend="postgres",
+            database_url="postgresql://user:pass@localhost:5432/tutormatch",
+            persist_to_file=True,
+        )
+
+
+def test_storage_backend_must_be_known() -> None:
+    with pytest.raises(ValueError, match="STORAGE_BACKEND"):
+        Settings(jwt_secret="s" * 64, storage_backend="sqlite")
+
+
+def test_from_env_reads_storage_backend(monkeypatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", "s" * 64)
+    monkeypatch.setenv("STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://user:pass@localhost:5432/tutormatch",
+    )
+
+    settings = Settings.from_env()
+
+    assert settings.storage_backend == "postgres"
+    assert settings.database_url == (
+        "postgresql+psycopg://user:pass@localhost:5432/tutormatch"
+    )

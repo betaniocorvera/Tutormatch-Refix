@@ -1,1 +1,1 @@
-"""Repository interfaces and in-memory implementations."""
+"""Repository interfaces plus in-memory and PostgreSQL implementations."""

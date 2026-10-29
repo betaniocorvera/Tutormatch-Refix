@@ -31,6 +31,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
+            if container.database is not None:
+                container.database.check()
             yield
         finally:
             container.close()

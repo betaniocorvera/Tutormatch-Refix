@@ -1,1 +1,12 @@
-Generic single-database configuration.
+Alembic migrations for the TutorMatch PostgreSQL schema.
+
+Run from the backend directory with `DATABASE_URL` set:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+The initial revision creates the users, security answers, profiles, refresh
+tokens, conversations, messages, events, and read-cursor tables. The application
+does not create tables automatically; apply migrations before starting it with
+`STORAGE_BACKEND=postgres`.

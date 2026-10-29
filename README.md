@@ -8,8 +8,10 @@ and messages now come from the API instead of sample data.
   for token restore. No fake data remains in `lib/`.
 - **Server:** Python 3.11+, FastAPI, pydantic, scikit-learn `NearestNeighbors`,
   Argon2id password and security-answer hashing, and JWT access/refresh tokens.
-- **Storage:** in memory behind repository interfaces. Optional atomic JSON
-  snapshots can be enabled for development. There is no database requirement.
+- **Storage:** in memory behind repository interfaces by default, with optional
+  atomic JSON snapshots for development or PostgreSQL via SQLAlchemy, psycopg 3,
+  and Alembic for a real deployment. Matching stays in Python; `pgvector` is not
+  required.
 
 The backend documentation is in [`backend/README.md`](backend/README.md), with
 the matching model in [`backend/MATCHING.md`](backend/MATCHING.md) and the chat
@@ -32,6 +34,12 @@ The API is at <http://127.0.0.1:8000>, with generated docs at
 <http://127.0.0.1:8000/docs>. The default `.env.example` allows the Flutter web
 development origin `http://localhost:8080` through CORS. Change
 `CORS_ORIGINS` (comma-separated) if the client runs on another origin.
+
+The backend starts with in-memory storage and needs no database. For PostgreSQL,
+set `STORAGE_BACKEND=postgres` and `DATABASE_URL` in `backend/.env`, then run
+`.\.venv\Scripts\python.exe -m alembic upgrade head` before starting uvicorn. See
+[`backend/README.md`](backend/README.md#postgresql-storage) for the full setup and
+test-database instructions.
 
 ### 2. Flutter web
 

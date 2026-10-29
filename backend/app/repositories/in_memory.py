@@ -1,8 +1,8 @@
 """In-memory repository implementations.
 
 They intentionally expose export/import methods so the optional JSON snapshot
-can persist them. A future PostgreSQL implementation would implement the same
-interfaces without these serialization helpers.
+can persist them. The PostgreSQL implementations in ``sql.py`` satisfy the same
+interfaces and do not use the snapshot helpers.
 """
 
 from __future__ import annotations

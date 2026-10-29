@@ -4,11 +4,24 @@ from __future__ import annotations
 
 from .catalog import Catalog, get_catalog
 from .config import Settings
+from .database import Database
 from .repositories.in_memory import (
     InMemoryConversationRepository,
     InMemoryProfileRepository,
     InMemoryRefreshTokenRepository,
     InMemoryUserRepository,
+)
+from .repositories.interfaces import (
+    ConversationRepository,
+    ProfileRepository,
+    RefreshTokenRepository,
+    UserRepository,
+)
+from .repositories.sql import (
+    SqlConversationRepository,
+    SqlProfileRepository,
+    SqlRefreshTokenRepository,
+    SqlUserRepository,
 )
 from .repositories.snapshot import (
     JsonSnapshotStore,
@@ -37,39 +50,53 @@ from .storage.photos import (
 class AppContainer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.database: Database | None = None
+
+        self.users: UserRepository
+        self.profiles: ProfileRepository
+        self.refresh_tokens: RefreshTokenRepository
+        self.conversations: ConversationRepository
 
         snapshot: SnapshotStore
-        if settings.persist_to_file:
-            snapshot = JsonSnapshotStore(
-                settings.store_path,
-                settings.snapshot_debounce_seconds,
-            )
-        else:
+        if settings.storage_backend == "postgres":
+            self.database = Database(settings)
+            self.users = SqlUserRepository(self.database)
+            self.profiles = SqlProfileRepository(self.database)
+            self.refresh_tokens = SqlRefreshTokenRepository(self.database)
+            self.conversations = SqlConversationRepository(self.database)
             snapshot = NoopSnapshotStore()
-        self.snapshot = snapshot
+        else:
+            if settings.persist_to_file:
+                snapshot = JsonSnapshotStore(
+                    settings.store_path,
+                    settings.snapshot_debounce_seconds,
+                )
+            else:
+                snapshot = NoopSnapshotStore()
 
-        self.users = InMemoryUserRepository(
-            on_change=self.snapshot.schedule
-        )
-        self.profiles = InMemoryProfileRepository(
-            on_change=self.snapshot.schedule
-        )
-        self.refresh_tokens = InMemoryRefreshTokenRepository(
-            on_change=self.snapshot.schedule
-        )
-        self.conversations = InMemoryConversationRepository(
-            on_change=self.snapshot.schedule
-        )
-        self.snapshot.register("users", self.users)
-        self.snapshot.register("profiles", self.profiles)
-        self.snapshot.register("refresh_tokens", self.refresh_tokens)
-        self.snapshot.register("conversations", self.conversations)
-        self.snapshot.load()
+            self.users = InMemoryUserRepository(
+                on_change=snapshot.schedule
+            )
+            self.profiles = InMemoryProfileRepository(
+                on_change=snapshot.schedule
+            )
+            self.refresh_tokens = InMemoryRefreshTokenRepository(
+                on_change=snapshot.schedule
+            )
+            self.conversations = InMemoryConversationRepository(
+                on_change=snapshot.schedule
+            )
+            snapshot.register("users", self.users)
+            snapshot.register("profiles", self.profiles)
+            snapshot.register("refresh_tokens", self.refresh_tokens)
+            snapshot.register("conversations", self.conversations)
+            snapshot.load()
+        self.snapshot = snapshot
 
         self.catalog: Catalog = get_catalog()
         photos: PhotoStorage
         chat_media: ChatMediaStorage
-        if settings.persist_to_file:
+        if settings.persist_to_file or settings.storage_backend == "postgres":
             photos = LocalPhotoStorage(settings.upload_path)
             chat_media = LocalChatMediaStorage(
                 settings.upload_path / "chat"
@@ -119,4 +146,8 @@ class AppContainer:
         )
 
     def close(self) -> None:
-        self.snapshot.close()
+        try:
+            self.snapshot.close()
+        finally:
+            if self.database is not None:
+                self.database.dispose()

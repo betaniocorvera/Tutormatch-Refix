@@ -38,6 +38,15 @@ class CatalogRepository {
     ];
   }
 
+  Future<List<SecurityQuestion>> securityQuestions() async {
+    final Map<String, dynamic> json =
+        jsonObject(await api.getJson('/security-questions', auth: false));
+    return <SecurityQuestion>[
+      for (final dynamic question in jsonList(json['questions']))
+        SecurityQuestion.fromJson(jsonObject(question)),
+    ];
+  }
+
   Place _place(Map<String, dynamic> json, Map<String, City> cities) {
     final String cityId = jsonString(json['city_id']);
     final City city = cities[cityId] ??

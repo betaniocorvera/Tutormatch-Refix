@@ -14,7 +14,8 @@ voice uploads, read receipts and unread counts, session proposals, simulated cal
 events, WebSocket push, and a polling fallback. Phase 5 connects the Flutter
 client to this API: repository-backed state, real auth restore and 401 logout,
 profile and photo flows, server-side match filters, requests, polling chat, and
-the Flutter web development CORS origin.
+the Flutter web development CORS origin. Phase 6 adds the confirmed,
+development-only demo seed and the final setup/reset documentation.
 
 Data lives in memory. Set `PERSIST_TO_FILE=true` to keep a debounced, atomic JSON
 snapshot at `data/store.json`; that snapshot includes users, profiles, refresh
@@ -43,6 +44,45 @@ without a real secret.
 ```
 
 Open http://127.0.0.1:8000/docs for the generated API docs.
+
+## Development seed
+
+The Flutter login screen's demo buttons use two real accounts. With the backend
+running, seed them from another terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.seed_dev
+```
+
+The script prints the target URL and asks you to type `seed`. Use `--yes` for
+an unattended run:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.seed_dev --yes
+```
+
+| Account | Role | Password |
+| --- | --- | --- |
+| `maya@tutormatch.dev` | student | `TutorMatch123!` |
+| `amara@tutormatch.dev` | tutor | `TutorMatch123!` |
+
+The seed is HTTP-based because the backend is in memory: a separate process
+cannot write into the running server's store. It checks `/health`, logs in
+existing demo accounts, registers missing ones, and PUTs complete profiles. It
+is idempotent and safe to rerun.
+
+Safety rules:
+
+- It refuses `APP_ENV=production`.
+- It only targets `localhost`, `127.0.0.1`, or `::1` unless `--allow-remote` is
+  explicitly passed.
+- It requires interactive confirmation unless `--yes` is passed.
+- If an email already exists with a different password or role, it stops with a
+  clear message instead of overwriting the account.
+
+The default `PERSIST_TO_FILE=false` store disappears on restart; rerun the seed
+after starting the backend again. With persistence enabled, the seeded data is
+part of the snapshot and survives a restart.
 
 ## Flutter web client
 
@@ -78,15 +118,28 @@ The matching evaluation is included in the suite. Run just that check with:
 
 ## Auth endpoints
 
-- `POST /auth/register` — `{email, password, role, display_name?}`
+- `POST /auth/register` — `{email, display_name, role, password, phone?, area_id, subjects, security_questions, privacy_consent, privacy_policy_version}`
 - `POST /auth/login` — `{email, password}`
 - `POST /auth/refresh` — `{refresh_token}`
 - `POST /auth/logout` — optional `{refresh_token}`, requires a bearer access token
 - `GET /auth/me` — requires a bearer access token
+- `GET /security-questions` — public catalogue of `{id, text}` entries
 
-Passwords are hashed with Argon2id through passlib. Access tokens last 15
-minutes by default; refresh tokens last 7 days and rotate on use. Login failures
-are rate-limited in memory per client IP and email.
+Registration requires a role of `student` or `tutor`, one to four subjects from
+the catalogue, a catalogue area, exactly three distinct security questions, and
+`privacy_consent: true` with `privacy_policy_version: "2026-10-v1"`. The server
+stores the consent flag, consent timestamp, and policy version on the user.
+
+Passwords are hashed with Argon2id through passlib. New passwords need at least
+10 characters, upper and lower case, a digit, a symbol, and must not be a common
+password or contain the account's email local part or name. Security answers are
+normalized (trimmed, lower-cased, whitespace-collapsed), hashed with the same
+hasher, and stored only as hashes; they are never returned by an endpoint or
+logged. Validation errors are stripped of the submitted `input` and `ctx`, so a
+password or answer cannot be echoed back in a 422 response.
+
+Access tokens last 15 minutes by default; refresh tokens last 7 days and rotate
+on use. Login failures are rate-limited in memory per client IP and email.
 
 ## Profile endpoints
 

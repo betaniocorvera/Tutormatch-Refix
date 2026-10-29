@@ -2,21 +2,34 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from ..catalog import Catalog
 from ..errors import (
     DuplicateEmailError,
     EmailAlreadyRegistered,
     InvalidCredentials,
+    InvalidProfile,
     InvalidToken,
     RateLimited,
 )
 from ..models.auth import RefreshToken
-from ..models.user import Role, User, UserMe
+from ..models.profile import Profile
+from ..models.user import (
+    Role,
+    SecurityAnswer,
+    SecurityAnswerInput,
+    User,
+    UserMe,
+)
+from ..passwords import normalize_security_answer
+from ..privacy import PRIVACY_POLICY_VERSION
 from ..repositories.interfaces import (
+    ProfileRepository,
     RefreshTokenRepository,
     UserRepository,
 )
@@ -42,16 +55,20 @@ class AuthService:
         self,
         *,
         users: UserRepository,
+        profiles: ProfileRepository,
         refresh_tokens: RefreshTokenRepository,
         passwords: PasswordHasher,
         tokens: TokenService,
         rate_limiter: LoginRateLimiter,
+        catalog: Catalog,
     ) -> None:
         self._users = users
+        self._profiles = profiles
         self._refresh_tokens = refresh_tokens
         self._passwords = passwords
         self._tokens = tokens
         self._rate_limiter = rate_limiter
+        self._catalog = catalog
         # Refresh rotation is a check-then-write operation. Without this lock,
         # two concurrent uses of the same refresh token could both succeed.
         self._refresh_lock = threading.Lock()
@@ -63,10 +80,35 @@ class AuthService:
         password: str,
         role: Role,
         display_name: str,
+        phone: str,
+        area_id: str,
+        subjects: list[str],
+        security_questions: list[SecurityAnswerInput],
+        privacy_consent: bool,
+        privacy_policy_version: str,
     ) -> AuthResult:
         normalized_email = self._normalize_email(email)
         if self._users.get_by_email(normalized_email) is not None:
             raise EmailAlreadyRegistered()
+
+        if not privacy_consent:
+            raise InvalidProfile(
+                "You must agree to the Privacy Notice to create an account."
+            )
+        if privacy_policy_version != PRIVACY_POLICY_VERSION:
+            raise InvalidProfile(
+                "The Privacy Notice has changed. Review it and try again."
+            )
+
+        area = self._catalog.area(area_id)
+        if area is None:
+            raise InvalidProfile("Choose an area from the catalogue.")
+        canonical_subjects = self._canonical_subjects(subjects)
+        answers = self._hash_security_answers(
+            security_questions,
+            email=normalized_email,
+            display_name=display_name,
+        )
 
         now = datetime.now(timezone.utc)
         user = User(
@@ -74,8 +116,13 @@ class AuthService:
             email=normalized_email,
             password_hash=self._passwords.hash(password),
             role=role,
-            display_name=display_name.strip(),
+            display_name=display_name,
+            phone=phone,
             onboarding_complete=False,
+            privacy_consent=True,
+            privacy_consent_at=now,
+            privacy_policy_version=PRIVACY_POLICY_VERSION,
+            security_answers=answers,
             created_at=now,
             updated_at=now,
         )
@@ -84,6 +131,18 @@ class AuthService:
         except DuplicateEmailError as exc:
             # A concurrent registration won the race.
             raise EmailAlreadyRegistered() from exc
+
+        # Registration already knows two onboarding answers. The remaining
+        # five questions still decide when onboarding is complete.
+        self._profiles.add(
+            Profile(
+                user_id=user.id,
+                name=display_name,
+                subjects=canonical_subjects,
+                area_id=area.id,
+                updated_at=now,
+            )
+        )
 
         return self._issue_tokens(user)
 
@@ -183,6 +242,92 @@ class AuthService:
 
     def access_expires_in(self) -> int:
         return self._tokens.access_expires_in()
+
+    def _canonical_subjects(self, subjects: list[str]) -> list[str]:
+        canonical: list[str] = []
+        seen: set[str] = set()
+        for item in subjects:
+            name = self._catalog.canonical_subject(item)
+            if name is None:
+                raise InvalidProfile(
+                    "Choose subjects from the subject catalogue."
+                )
+            key = name.casefold()
+            if key in seen:
+                raise InvalidProfile("A subject can only appear once.")
+            seen.add(key)
+            canonical.append(name)
+        if not canonical:
+            raise InvalidProfile("Choose at least one subject.")
+        if len(canonical) > 4:
+            raise InvalidProfile("Choose up to four subjects.")
+        return canonical
+
+    def _hash_security_answers(
+        self,
+        questions: list[SecurityAnswerInput],
+        *,
+        email: str,
+        display_name: str,
+    ) -> list[SecurityAnswer]:
+        if len(questions) != 3:
+            raise InvalidProfile("Choose three security questions.")
+
+        answers: list[SecurityAnswer] = []
+        seen: set[str] = set()
+        for item in questions:
+            if self._catalog.security_question(item.question_id) is None:
+                raise InvalidProfile(
+                    "Choose security questions from the list."
+                )
+            if item.question_id in seen:
+                raise InvalidProfile(
+                    "Choose three different security questions."
+                )
+            seen.add(item.question_id)
+
+            answer = normalize_security_answer(item.answer)
+            if len(answer) < 3:
+                raise InvalidProfile(
+                    "Each security answer must be at least 3 characters."
+                )
+            if self._answer_matches_identity(
+                answer,
+                email=email,
+                display_name=display_name,
+            ):
+                raise InvalidProfile(
+                    "Security answers cannot be your email or name."
+                )
+            answers.append(
+                SecurityAnswer(
+                    question_id=item.question_id,
+                    answer_hash=self._passwords.hash(answer),
+                )
+            )
+        return answers
+
+    @staticmethod
+    def _answer_matches_identity(
+        answer: str,
+        *,
+        email: str,
+        display_name: str,
+    ) -> bool:
+        candidates = {
+            email.casefold(),
+            email.split("@", 1)[0].casefold(),
+            display_name.casefold(),
+        }
+        for token in re.split(r"[\s\-'.]+", display_name.casefold()):
+            if len(token) >= 3:
+                candidates.add(token)
+        normalized = {
+            normalize_security_answer(candidate)
+            for candidate in candidates
+            if candidate.strip()
+        }
+        return answer in normalized
 
     def _issue_tokens(self, user: User) -> AuthResult:
         access = self._tokens.create_access_token(user)

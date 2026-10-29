@@ -17,6 +17,7 @@ from app.repositories.in_memory import (
     InMemoryRefreshTokenRepository,
     InMemoryUserRepository,
 )
+from tests.registration import COMPLIANT_PASSWORD, registration_payload
 
 
 def _user(
@@ -143,12 +144,10 @@ def test_snapshot_round_trip_preserves_users_and_refresh_tokens(
     with TestClient(first_app) as first_client:
         registered = first_client.post(
             "/auth/register",
-            json={
-                "email": "persisted@example.com",
-                "password": "correct horse battery",
-                "role": "student",
-                "display_name": "Persisted User",
-            },
+            json=registration_payload(
+                email="persisted@example.com",
+                display_name="Persisted User",
+            ),
         )
         assert registered.status_code == 201
         first_body = registered.json()
@@ -161,7 +160,7 @@ def test_snapshot_round_trip_preserves_users_and_refresh_tokens(
             "/auth/login",
             json={
                 "email": "persisted@example.com",
-                "password": "correct horse battery",
+                "password": COMPLIANT_PASSWORD,
             },
         )
         assert login.status_code == 200
@@ -187,12 +186,9 @@ def test_snapshot_round_trip_preserves_profiles(tmp_path) -> None:
     with TestClient(first_app) as first_client:
         registered = first_client.post(
             "/auth/register",
-            json={
-                "email": "profile-persist@example.com",
-                "password": "correct horse battery",
-                "role": "student",
-                "display_name": "Maya Chen",
-            },
+            json=registration_payload(
+                email="profile-persist@example.com",
+            ),
         )
         assert registered.status_code == 201
         access = registered.json()["access_token"]
@@ -216,7 +212,7 @@ def test_snapshot_round_trip_preserves_profiles(tmp_path) -> None:
             "/auth/login",
             json={
                 "email": "profile-persist@example.com",
-                "password": "correct horse battery",
+                "password": COMPLIANT_PASSWORD,
             },
         )
         assert login.status_code == 200
@@ -245,11 +241,7 @@ def test_snapshot_is_valid_json_and_leaves_no_temp_file(
     with TestClient(persistent_app) as persistent_client:
         registered = persistent_client.post(
             "/auth/register",
-            json={
-                "email": "snapshot2@example.com",
-                "password": "correct horse battery",
-                "role": "student",
-            },
+            json=registration_payload(email="snapshot2@example.com"),
         )
         assert registered.status_code == 201
         persistent_app.state.container.snapshot.flush()
@@ -270,11 +262,7 @@ def test_snapshot_is_not_written_when_disabled(
 ) -> None:
     response = client.post(
         "/auth/register",
-        json={
-            "email": "memory@example.com",
-            "password": "correct horse battery",
-            "role": "student",
-        },
+        json=registration_payload(email="memory@example.com"),
     )
     assert response.status_code == 201
     assert not settings.store_path.exists()

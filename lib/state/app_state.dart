@@ -118,6 +118,7 @@ class AppState extends ChangeNotifier {
   List<Place> _places = const <Place>[];
   List<String> _regions = const <String>[];
   List<SubjectOption> _subjectOptions = const <SubjectOption>[];
+  List<SecurityQuestion> _securityQuestions = const <SecurityQuestion>[];
   String? _catalogError;
 
   List<City> get cities => _cities;
@@ -127,6 +128,7 @@ class AppState extends ChangeNotifier {
   List<String> get subjects => <String>[
         for (final SubjectOption subject in _subjectOptions) subject.name,
       ];
+  List<SecurityQuestion> get securityQuestions => _securityQuestions;
   String? get catalogError => _catalogError;
 
   Place? placeById(String? id) {
@@ -165,13 +167,26 @@ class AppState extends ChangeNotifier {
     final List<dynamic> results = await Future.wait(<Future<dynamic>>[
       _catalog.areas(),
       _catalog.subjects(),
+      _catalog.securityQuestions(),
     ]);
     final AreaCatalogue areas = results[0] as AreaCatalogue;
     _cities = areas.cities;
     _places = areas.places;
     _regions = areas.regions;
     _subjectOptions = results[1] as List<SubjectOption>;
+    _securityQuestions = results[2] as List<SecurityQuestion>;
     _catalogError = null;
+  }
+
+  /// Retry the public catalogues after a network failure. The register form
+  /// calls this from its inline retry action; it never throws.
+  Future<void> reloadCatalog() async {
+    try {
+      await _loadCatalog();
+    } on ApiException catch (error) {
+      _catalogError = error.message;
+    }
+    notifyListeners();
   }
 
   // ── Session ────────────────────────────────────────────────────────────────
@@ -221,12 +236,24 @@ class AppState extends ChangeNotifier {
     required String password,
     required Role role,
     required String displayName,
+    required String phone,
+    required String areaId,
+    required List<String> subjects,
+    required List<SecurityAnswerInput> securityQuestions,
+    required bool privacyConsent,
+    required String privacyPolicyVersion,
   }) async {
     final AuthSession session = await _auth.register(
       email: email,
       password: password,
       role: role,
       displayName: displayName,
+      phone: phone,
+      areaId: areaId,
+      subjects: subjects,
+      securityQuestions: securityQuestions,
+      privacyConsent: privacyConsent,
+      privacyPolicyVersion: privacyPolicyVersion,
     );
     _user = session.user;
     _signedIn = true;

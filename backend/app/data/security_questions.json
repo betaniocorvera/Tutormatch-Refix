@@ -1,0 +1,52 @@
+{
+  "questions": [
+    {
+      "id": "first-pet",
+      "text": "What was the name of your first pet?"
+    },
+    {
+      "id": "first-school",
+      "text": "What was the name of your first school?"
+    },
+    {
+      "id": "favourite-teacher",
+      "text": "What was the name of your favourite teacher?"
+    },
+    {
+      "id": "childhood-street",
+      "text": "What street did you grow up on?"
+    },
+    {
+      "id": "mother-maiden-name",
+      "text": "What is your mother's maiden name?"
+    },
+    {
+      "id": "first-job",
+      "text": "What was your first paid job?"
+    },
+    {
+      "id": "childhood-nickname",
+      "text": "What was your childhood nickname?"
+    },
+    {
+      "id": "first-concert",
+      "text": "What was the first concert you attended?"
+    },
+    {
+      "id": "favourite-book",
+      "text": "What is your favourite book?"
+    },
+    {
+      "id": "first-car",
+      "text": "What was the make of your first car?"
+    },
+    {
+      "id": "favourite-place",
+      "text": "What is your favourite place in your home town?"
+    },
+    {
+      "id": "first-best-friend",
+      "text": "What was the name of your best friend in primary school?"
+    }
+  ]
+}

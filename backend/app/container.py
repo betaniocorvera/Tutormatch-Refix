@@ -88,10 +88,12 @@ class AppContainer:
         )
         self.auth = AuthService(
             users=self.users,
+            profiles=self.profiles,
             refresh_tokens=self.refresh_tokens,
             passwords=self.passwords,
             tokens=self.tokens,
             rate_limiter=self.login_rate_limiter,
+            catalog=self.catalog,
         )
         self.profile = ProfileService(
             users=self.users,

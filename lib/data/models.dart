@@ -1627,6 +1627,33 @@ class Conversation {
 // Accounts and formatting
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// One public security question. The catalogue contains only the id and text;
+/// answers never leave the client except as a hash input on the server.
+class SecurityQuestion {
+  const SecurityQuestion({required this.id, required this.text});
+
+  final String id;
+  final String text;
+
+  factory SecurityQuestion.fromJson(Map<String, dynamic> json) =>
+      SecurityQuestion(
+        id: jsonString(json['id']),
+        text: jsonString(json['text']),
+      );
+}
+
+/// A question/answer pair collected during registration. The answer is sent
+/// once, hashed by the backend, and never requested back.
+class SecurityAnswerInput {
+  const SecurityAnswerInput({
+    required this.questionId,
+    required this.answer,
+  });
+
+  final String questionId;
+  final String answer;
+}
+
 class UserAccount {
   const UserAccount({
     required this.id,

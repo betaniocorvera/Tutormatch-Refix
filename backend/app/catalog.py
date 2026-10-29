@@ -18,6 +18,8 @@ from .models.catalog import (
     AreaOption,
     CityOption,
     ProfileOptions,
+    SecurityQuestion,
+    SecurityQuestionCatalogue,
     SubjectCatalogue,
     SubjectOption,
 )
@@ -67,6 +69,19 @@ class _SubjectsFile(BaseModel):
     subjects: list[_SubjectSeed] = Field(min_length=1)
 
 
+class _SecurityQuestionSeed(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=10, max_length=200)
+
+
+class _SecurityQuestionsFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    questions: list[_SecurityQuestionSeed] = Field(min_length=10)
+
+
 class Catalog:
     """Validated, read-only reference data."""
 
@@ -77,16 +92,21 @@ class Catalog:
         cities: list[CityOption],
         areas: list[AreaOption],
         subjects: list[SubjectOption],
+        security_questions: list[SecurityQuestion],
         options: ProfileOptions,
     ) -> None:
         self.regions = list(regions)
         self.cities = list(cities)
         self.areas = list(areas)
         self.subjects = list(subjects)
+        self.security_questions = list(security_questions)
         self.options = options
 
         self._cities_by_id = {city.id: city for city in self.cities}
         self._areas_by_id = {area.id: area for area in self.areas}
+        self._security_questions_by_id = {
+            question.id: question for question in self.security_questions
+        }
         self._subjects_by_key = {
             subject.name.casefold(): subject.name for subject in self.subjects
         }
@@ -113,6 +133,9 @@ class Catalog:
             areas=self.areas,
         )
         self._subject_catalogue = SubjectCatalogue(subjects=self.subjects)
+        self._security_question_catalogue = SecurityQuestionCatalogue(
+            questions=self.security_questions
+        )
 
     @staticmethod
     def _keyed(values: list[str]) -> dict[str, str]:
@@ -131,6 +154,12 @@ class Catalog:
 
     def subject_catalogue(self) -> SubjectCatalogue:
         return self._subject_catalogue
+
+    def security_question_catalogue(self) -> SecurityQuestionCatalogue:
+        return self._security_question_catalogue
+
+    def security_question(self, question_id: str) -> SecurityQuestion | None:
+        return self._security_questions_by_id.get(question_id)
 
     def canonical_subject(self, value: str) -> str | None:
         cleaned = value.strip()
@@ -175,6 +204,9 @@ def _load_catalog() -> Catalog:
     )
     subjects_raw = _SubjectsFile.model_validate(
         _read_json(_DATA_DIR / "subjects.json")
+    )
+    security_raw = _SecurityQuestionsFile.model_validate(
+        _read_json(_DATA_DIR / "security_questions.json")
     )
     options = ProfileOptions.model_validate(
         _read_json(_DATA_DIR / "profile_options.json")
@@ -249,6 +281,23 @@ def _load_catalog() -> Catalog:
         subject_names.add(key)
         subjects.append(SubjectOption(id=seed.id, name=seed.name))
 
+    question_ids: set[str] = set()
+    question_texts: set[str] = set()
+    security_questions: list[SecurityQuestion] = []
+    for seed in security_raw.questions:
+        if seed.id in question_ids:
+            raise RuntimeError(f"Duplicate security question id: {seed.id}")
+        key = seed.text.casefold()
+        if key in question_texts:
+            raise RuntimeError(
+                f"Duplicate security question text: {seed.text}"
+            )
+        question_ids.add(seed.id)
+        question_texts.add(key)
+        security_questions.append(
+            SecurityQuestion(id=seed.id, text=seed.text)
+        )
+
     for label, values in (
         ("student style", options.student_styles),
         ("tutor style", options.tutor_styles),
@@ -266,6 +315,7 @@ def _load_catalog() -> Catalog:
         cities=cities,
         areas=areas,
         subjects=subjects,
+        security_questions=security_questions,
         options=options,
     )
 

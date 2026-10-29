@@ -5,6 +5,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app.services.profile import age_on
+from tests.registration import registration_payload
 
 
 def _register(
@@ -16,12 +17,11 @@ def _register(
 ) -> dict:
     response = client.post(
         "/auth/register",
-        json={
-            "email": email,
-            "password": "correct horse battery",
-            "role": role,
-            "display_name": display_name,
-        },
+        json=registration_payload(
+            email=email,
+            role=role,
+            display_name=display_name,
+        ),
     )
     assert response.status_code == 201
     return response.json()
@@ -113,7 +113,9 @@ def test_get_profile_returns_defaults_for_a_new_account(
     assert body["user_id"] == tokens["user"]["id"]
     assert body["role"] == "student"
     assert body["name"] == "Maya Chen"
-    assert body["subjects"] == []
+    assert body["subjects"] == ["Calculus"]
+    assert body["area_id"] == "london-highbury"
+    assert body["lives_in"] == "Highbury, London"
     assert body["style"] == ""
     assert body["mode"] == "both"
     assert body["budget"] == 0
@@ -121,14 +123,13 @@ def test_get_profile_returns_defaults_for_a_new_account(
     assert body["goal"] == ""
     assert body["age"] is None
     assert body["birthdate"] is None
-    assert body["lives_in"] == ""
-    assert body["area_id"] == ""
     assert body["location_privacy"] == "city_only"
-    assert body["public_location"] is None
+    assert body["public_location"]["city"] == "London"
     assert body["photo_url"] is None
     assert body["gender"] == "Prefer not to say"
     assert body["onboarding_complete"] is False
-    assert body["completeness"]["filled"] == 1
+    # Name, subjects, and area are supplied by registration.
+    assert body["completeness"]["filled"] == 3
     assert body["completeness"]["total"] == 12
     assert "a picture" in body["completeness"]["missing"]
     assert "email" not in body
@@ -607,6 +608,16 @@ def test_a_viewer_without_an_area_gets_no_distance(
         email="target@example.com",
         role="tutor",
         display_name="Amara Okonkwo",
+    )
+    # Registration requires an area, so clear the viewer's explicitly to test
+    # the "no distance without a viewer area" rule.
+    assert (
+        client.put(
+            "/profile",
+            json={"area_id": None},
+            headers=_headers(viewer),
+        ).status_code
+        == 200
     )
     assert (
         client.put(

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from tests.registration import registration_payload
+
 STUDENT_STYLE = "Watch one worked example, then do the next one myself"
 TUTOR_STYLE = "I work through examples slowly and let the student steer"
 STUDENT_GOAL = "Move up a grade or two this year"
@@ -36,12 +38,11 @@ def register(
 ) -> dict:
     response = client.post(
         "/auth/register",
-        json={
-            "email": email,
-            "password": "correct horse battery",
-            "role": role,
-            "display_name": name,
-        },
+        json=registration_payload(
+            email=email,
+            role=role,
+            display_name=name,
+        ),
     )
     assert response.status_code == 201, response.text
     return response.json()

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from tests.registration import registration_payload
+
 STUDENT_STYLE = "Watch one worked example, then do the next one myself"
 STUDENT_STYLE_ALT = "Talk it through until it makes sense"
 STUDENT_GOAL = "Move up a grade or two this year"
@@ -38,12 +40,11 @@ def _register(
 ) -> dict:
     response = client.post(
         "/auth/register",
-        json={
-            "email": email,
-            "password": "correct horse battery",
-            "role": role,
-            "display_name": name,
-        },
+        json=registration_payload(
+            email=email,
+            role=role,
+            display_name=name,
+        ),
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -139,8 +140,9 @@ def test_matches_cold_start_lists_the_missing_answers(
     assert body["pool_size"] == 0
     assert body["ranked_count"] == 0
     assert body["cold_start"]["reason"] == "profile_incomplete"
+    # Registration already supplies subjects and area; these are the answers
+    # the five-question onboarding still has to collect.
     assert body["cold_start"]["missing"] == [
-        "subjects",
         "style",
         "availability",
         "goal",

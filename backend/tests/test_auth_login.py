@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from tests.registration import COMPLIANT_PASSWORD
+
 
 def test_login_success_is_case_insensitive(
     client: TestClient,
@@ -13,7 +15,7 @@ def test_login_success_is_case_insensitive(
         "/auth/login",
         json={
             "email": "STUDENT@example.com",
-            "password": "correct horse battery",
+            "password": COMPLIANT_PASSWORD,
         },
     )
 
@@ -73,7 +75,7 @@ def test_login_rate_limit_blocks_after_five_failures(
         "/auth/login",
         json={
             "email": "student@example.com",
-            "password": "correct horse battery",
+            "password": COMPLIANT_PASSWORD,
         },
     )
 
@@ -148,7 +150,7 @@ def test_successful_login_clears_failure_count(
             "/auth/login",
             json={
                 "email": "student@example.com",
-                "password": "correct horse battery",
+                "password": COMPLIANT_PASSWORD,
             },
         ).status_code
         == 200
@@ -173,7 +175,7 @@ def test_successful_login_clears_failure_count(
             "/auth/login",
             json={
                 "email": "student@example.com",
-                "password": "correct horse battery",
+                "password": COMPLIANT_PASSWORD,
             },
         ).status_code
         == 429

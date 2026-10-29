@@ -382,6 +382,7 @@ class FakeApi {
         path != '/auth/refresh' &&
         path != '/areas' &&
         path != '/subjects' &&
+        path != '/security-questions' &&
         !path.startsWith('/users/') &&
         !path.startsWith('/media/') &&
         !authed) {
@@ -419,6 +420,52 @@ class FakeApi {
           <String, String>{'id': 'calculus', 'name': 'Calculus'},
           <String, String>{'id': 'physics', 'name': 'Physics'},
           <String, String>{'id': 'statistics', 'name': 'Statistics'},
+        ],
+      });
+    }
+    if (method == 'GET' && path == '/security-questions') {
+      return _json(<String, dynamic>{
+        'questions': <Map<String, String>>[
+          <String, String>{
+            'id': 'first-pet',
+            'text': 'What was the name of your first pet?',
+          },
+          <String, String>{
+            'id': 'first-school',
+            'text': 'What was the name of your first school?',
+          },
+          <String, String>{
+            'id': 'favourite-teacher',
+            'text': 'What was the name of your favourite teacher?',
+          },
+          <String, String>{
+            'id': 'childhood-street',
+            'text': 'What street did you grow up on?',
+          },
+          <String, String>{
+            'id': 'first-job',
+            'text': 'What was your first paid job?',
+          },
+          <String, String>{
+            'id': 'childhood-nickname',
+            'text': 'What was your childhood nickname?',
+          },
+          <String, String>{
+            'id': 'first-concert',
+            'text': 'What was the first concert you attended?',
+          },
+          <String, String>{
+            'id': 'favourite-book',
+            'text': 'What is your favourite book?',
+          },
+          <String, String>{
+            'id': 'first-car',
+            'text': 'What was the make of your first car?',
+          },
+          <String, String>{
+            'id': 'favourite-place',
+            'text': 'What is your favourite place in your home town?',
+          },
         ],
       });
     }

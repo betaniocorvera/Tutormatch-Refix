@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+
+from tests.registration import COMPLIANT_PASSWORD
 from jose import jwt
 
 
@@ -192,7 +194,7 @@ def test_logout_without_body_revokes_all_user_refresh_tokens(
         "/auth/login",
         json={
             "email": "student@example.com",
-            "password": "correct horse battery",
+            "password": COMPLIANT_PASSWORD,
         },
     )
     assert second.status_code == 200

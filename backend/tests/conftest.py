@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from tests.registration import COMPLIANT_PASSWORD, registration_payload
 
 
 @pytest.fixture()
@@ -46,18 +47,18 @@ def register(client: TestClient):
     def _register(
         *,
         email: str = "student@example.com",
-        password: str = "correct horse battery",
+        password: str = COMPLIANT_PASSWORD,
         role: str = "student",
         display_name: str = "Maya Chen",
     ):
         return client.post(
             "/auth/register",
-            json={
-                "email": email,
-                "password": password,
-                "role": role,
-                "display_name": display_name,
-            },
+            json=registration_payload(
+                email=email,
+                password=password,
+                role=role,
+                display_name=display_name,
+            ),
         )
 
     return _register

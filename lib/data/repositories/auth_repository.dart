@@ -24,14 +24,32 @@ class AuthRepository {
     required String password,
     required Role role,
     required String displayName,
+    required String phone,
+    required String areaId,
+    required List<String> subjects,
+    required List<SecurityAnswerInput> securityQuestions,
+    required bool privacyConsent,
+    required String privacyPolicyVersion,
   }) async {
     final Map<String, dynamic> json = jsonObject(await api.postJson(
       '/auth/register',
-      body: <String, String>{
+      body: <String, dynamic>{
         'email': email,
         'password': password,
         'role': roleToApi(role),
         'display_name': displayName,
+        'phone': phone,
+        'area_id': areaId,
+        'subjects': subjects,
+        'security_questions': <Map<String, String>>[
+          for (final SecurityAnswerInput item in securityQuestions)
+            <String, String>{
+              'question_id': item.questionId,
+              'answer': item.answer,
+            },
+        ],
+        'privacy_consent': privacyConsent,
+        'privacy_policy_version': privacyPolicyVersion,
       },
       auth: false,
     ));

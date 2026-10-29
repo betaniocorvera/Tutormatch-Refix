@@ -85,8 +85,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _useDemoAccount() {
     final String email = _role == Role.student
-        ? 'maya@tutormatch.local'
-        : 'amara@tutormatch.local';
+        ? 'maya@tutormatch.dev'
+        : 'amara@tutormatch.dev';
     _email.text = email;
     _password.text = _demoPassword;
     _submit(email: email, password: _demoPassword);
@@ -194,9 +194,9 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: Space.md),
             Text(
               _role == Role.student
-                  ? 'maya@tutormatch.local · $_demoPassword\n'
+                  ? 'maya@tutormatch.dev · $_demoPassword\n'
                       'Maya Chen, Year 12 — calculus and physics, weekday evenings.'
-                  : 'amara@tutormatch.local · $_demoPassword\n'
+                  : 'amara@tutormatch.dev · $_demoPassword\n'
                       'Amara Okonkwo — calculus and statistics, online, weekday '
                       'evenings and Saturday mornings.',
               style: AppType.bodySmall.quieter,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -23,7 +24,11 @@ class AppError(Exception):
 
 class EmailAlreadyRegistered(AppError):
     status_code = 409
-    detail = "An account with that email already exists."
+    # Neutral by design: it does not say whether the address is registered.
+    detail = (
+        "We couldn't create an account with that email. "
+        "Try signing in or use a different address."
+    )
 
 
 class InvalidCredentials(AppError):
@@ -168,6 +173,30 @@ class DuplicateEmailError(Exception):
     """Repository-level conflict raised when an email is already stored."""
 
 
+def _validation_errors(exc: RequestValidationError) -> list[dict[str, object]]:
+    """Keep the location and message, drop the submitted value.
+
+    FastAPI's default handler includes ``input`` and sometimes ``ctx``. For a
+    registration form that carries a password and three security answers, that
+    would echo secrets back in a 422 response. Only the field path and a
+    human-readable message are safe to return.
+    """
+
+    errors: list[dict[str, object]] = []
+    for error in exc.errors():
+        location = [
+            str(part) for part in error.get("loc", ())
+        ]
+        errors.append(
+            {
+                "loc": location,
+                "msg": str(error.get("msg", "Invalid value.")),
+                "type": str(error.get("type", "value_error")),
+            }
+        )
+    return errors
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handle_app_error(
@@ -177,4 +206,14 @@ def install_exception_handlers(app: FastAPI) -> None:
             status_code=exc.status_code,
             content={"detail": exc.detail},
             headers=exc.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _handle_request_validation(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": _validation_errors(exc)},
         )

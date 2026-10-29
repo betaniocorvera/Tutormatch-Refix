@@ -7,7 +7,7 @@ and messages now come from the API instead of sample data.
 - **Client:** Flutter 3.47 / Dart 3.13, `http` for REST, `shared_preferences`
   for token restore. No fake data remains in `lib/`.
 - **Server:** Python 3.11+, FastAPI, pydantic, scikit-learn `NearestNeighbors`,
-  Argon2id password hashing, and JWT access/refresh tokens.
+  Argon2id password and security-answer hashing, and JWT access/refresh tokens.
 - **Storage:** in memory behind repository interfaces. Optional atomic JSON
   snapshots can be enabled for development. There is no database requirement.
 
@@ -53,12 +53,43 @@ If Windows reports that plugin symlink support is disabled, enable Developer
 Mode in Windows Settings and run `flutter pub get` again. The project has
 already been built and tested with the current Windows setup.
 
-### 3. First account
+### 3. Seed the demo accounts
 
-The login screen's two demo buttons expect the development seed accounts added
-in Phase 6. Until that seed script is run, use **Create an account** and complete
-the five onboarding answers. A new account is stored in memory and disappears
-when the backend restarts unless persistence is enabled.
+The login screen's two demo buttons use real accounts. With the backend still
+running, open a second terminal:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m scripts.seed_dev
+```
+
+The script prints what it will do and asks you to type `seed`. For an
+unattended run, add `--yes`:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.seed_dev --yes
+```
+
+| Account | Role | Password |
+| --- | --- | --- |
+| `maya@tutormatch.dev` | student | `TutorMatch123!` |
+| `amara@tutormatch.dev` | tutor | `TutorMatch123!` |
+
+The seed is idempotent: it logs in existing demo accounts, registers only
+missing ones, and updates both profiles. It talks to the running API, so it
+works with both persistence modes. It refuses `APP_ENV=production`, refuses a
+non-local API URL unless `--allow-remote` is passed, and never sends email.
+Start the backend before running it.
+
+If an account already exists with a different password, the seed stops rather
+than overwrite it. Reset the development data as described below, restart the
+backend, and run the seed again.
+
+You can still use **Create an account** instead. Registration is four steps:
+account details, subjects and area, three different security questions, and the
+required RA 10173 privacy consent. A new account is stored in memory and
+disappears when the backend restarts unless persistence is enabled. The Privacy
+Notice is also reachable at the `/privacy` route and from the consent step.
 
 ## Tests
 
@@ -101,11 +132,27 @@ are gitignored.
 
 To reset a persistent development store, stop the backend and delete
 `backend/data/store.json` and `backend/data/uploads` (or the configured
-`STORE_PATH` and `UPLOAD_DIR`), then start it again. Never commit those paths.
+`STORE_PATH` and `UPLOAD_DIR`), then start it again and rerun
+`.\.venv\Scripts\python.exe -m scripts.seed_dev` from `backend` if you want the
+demo accounts back. With `PERSIST_TO_FILE=false`, simply restarting the backend
+clears everything, so rerun the seed after each restart. Never commit those
+paths.
 
 ## Security notes
 
 - Passwords are hashed with Argon2id; plaintext passwords are never stored.
+- New passwords must be at least 10 characters with upper and lower case, a
+  digit, and a symbol. Common passwords and the account's name or email local
+  part are rejected.
+- Registration requires three different security questions. Answers are
+  trimmed, lower-cased, whitespace-collapsed, and hashed with Argon2id; only the
+  hashes are stored. Answers are never returned by an endpoint or written to
+  logs.
+- Registration requires consent to Privacy Notice version `2026-10-v1`. The
+  server stores the flag, the consent timestamp, and the version; the same
+  version is shown on the Flutter Privacy Notice page.
+- Duplicate-email responses use one neutral message instead of confirming which
+  address exists. Validation errors omit the submitted password and answers.
 - Access tokens last 15 minutes. Refresh tokens last 7 days, rotate on use, and
   are revoked on logout.
 - `APP_ENV=production` requires a real `JWT_SECRET`; development may generate an

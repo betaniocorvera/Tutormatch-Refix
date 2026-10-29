@@ -10,6 +10,7 @@ from app.config import Settings
 from app.main import create_app
 from app.services.photo_processing import MAX_UPLOAD_BYTES
 from app.storage.photos import LocalPhotoStorage
+from tests.registration import registration_payload
 
 
 def _register(
@@ -21,12 +22,11 @@ def _register(
 ) -> dict:
     response = client.post(
         "/auth/register",
-        json={
-            "email": email,
-            "password": "correct horse battery",
-            "role": role,
-            "display_name": display_name,
-        },
+        json=registration_payload(
+            email=email,
+            role=role,
+            display_name=display_name,
+        ),
     )
     assert response.status_code == 201
     return response.json()
@@ -70,7 +70,8 @@ def test_upload_reencodes_stores_and_serves_a_photo(
     assert uploaded.status_code == 200
     body = uploaded.json()
     assert body["photo_url"] == f"/users/{user_id}/photo"
-    assert body["completeness"]["filled"] == 2
+    # Name, subjects, and area come from registration; the photo is the fourth.
+    assert body["completeness"]["filled"] == 4
     assert "a picture" not in body["completeness"]["missing"]
 
     served = client.get(f"/users/{user_id}/photo", headers=headers)
@@ -267,12 +268,7 @@ def test_photo_and_profile_survive_a_persistent_restart(tmp_path) -> None:
     with TestClient(first_app) as first_client:
         registered = first_client.post(
             "/auth/register",
-            json={
-                "email": "photo-persist@example.com",
-                "password": "correct horse battery",
-                "role": "student",
-                "display_name": "Maya Chen",
-            },
+            json=registration_payload(email="photo-persist@example.com"),
         )
         assert registered.status_code == 201
         access = registered.json()["access_token"]
@@ -297,7 +293,7 @@ def test_photo_and_profile_survive_a_persistent_restart(tmp_path) -> None:
             "/auth/login",
             json={
                 "email": "photo-persist@example.com",
-                "password": "correct horse battery",
+                "password": "CorrectHorse1!",
             },
         )
         assert login.status_code == 200

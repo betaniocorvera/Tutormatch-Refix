@@ -45,6 +45,12 @@ def register(
         password=payload.password,
         role=payload.role,
         display_name=payload.display_name,
+        phone=payload.phone,
+        area_id=payload.area_id,
+        subjects=payload.subjects,
+        security_questions=payload.security_questions,
+        privacy_consent=payload.privacy_consent,
+        privacy_policy_version=payload.privacy_policy_version,
     )
     return _auth_response(result, auth)
 

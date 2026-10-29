@@ -13,10 +13,19 @@ const String apiBaseUrl = String.fromEnvironment(
 );
 
 class ApiException implements Exception {
-  const ApiException(this.message, {this.statusCode});
+  const ApiException(
+    this.message, {
+    this.statusCode,
+    this.fieldErrors = const <String, String>{},
+  });
 
   final String message;
   final int? statusCode;
+
+  /// FastAPI 422 entries keyed by a dotted field path, for example
+  /// `email` or `security_questions.0.answer`. Values are already cleaned of
+  /// the Pydantic "Value error, " prefix so they can be shown inline.
+  final Map<String, String> fieldErrors;
 
   bool get isUnauthorized => statusCode == 401;
 
@@ -306,6 +315,7 @@ class ApiClient {
       >= 500 => 'The server could not complete that request.',
       _ => 'The request could not be completed.',
     };
+    final Map<String, String> fieldErrors = <String, String>{};
     try {
       final dynamic body = jsonDecode(utf8.decode(response.bodyBytes));
       if (body is Map<String, dynamic>) {
@@ -315,8 +325,25 @@ class ApiClient {
         } else if (detail is List && detail.isNotEmpty) {
           final List<String> messages = <String>[];
           for (final dynamic item in detail) {
-            if (item is Map && item['msg'] is String) {
-              messages.add(item['msg'] as String);
+            if (item is! Map) continue;
+            final dynamic rawMessage = item['msg'];
+            if (rawMessage is! String) continue;
+            final String cleaned = rawMessage
+                .replaceFirst(RegExp(r'^Value error,\s*'), '')
+                .trim();
+            if (cleaned.isEmpty) continue;
+            messages.add(cleaned);
+
+            final dynamic loc = item['loc'];
+            if (loc is List) {
+              final List<String> parts = <String>[
+                for (final dynamic part in loc)
+                  if (part != 'body' && (part is String || part is int))
+                    part.toString(),
+              ];
+              if (parts.isNotEmpty) {
+                fieldErrors.putIfAbsent(parts.join('.'), () => cleaned);
+              }
             }
           }
           if (messages.isNotEmpty) message = messages.join(' ');
@@ -325,6 +352,10 @@ class ApiClient {
     } on FormatException {
       // Keep the status-specific fallback.
     }
-    return ApiException(message, statusCode: response.statusCode);
+    return ApiException(
+      message,
+      statusCode: response.statusCode,
+      fieldErrors: fieldErrors,
+    );
   }
 }

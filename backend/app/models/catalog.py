@@ -49,6 +49,24 @@ class SubjectCatalogue(BaseModel):
     subjects: list[SubjectOption]
 
 
+class SecurityQuestion(BaseModel):
+    """A question a person may choose at registration.
+
+    The text is public; the answer is never part of this model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    text: str
+
+
+class SecurityQuestionCatalogue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    questions: list[SecurityQuestion]
+
+
 class ProfileOptions(BaseModel):
     """The non-location answer sets the profile editor can offer."""
 

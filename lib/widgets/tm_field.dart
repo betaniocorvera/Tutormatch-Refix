@@ -74,6 +74,7 @@ class TMTextField extends StatefulWidget {
     this.helper,
     this.reason,
     this.obscure = false,
+    this.secretLabel = 'password',
     this.keyboardType,
     this.textInputAction = TextInputAction.next,
     this.onChanged,
@@ -93,6 +94,12 @@ class TMTextField extends StatefulWidget {
   final String? helper;
   final String? reason;
   final bool obscure;
+
+  /// The word used by the reveal control's tooltip. Password fields use the
+  /// default; a security answer passes "answer" so the control does not
+  /// announce the wrong kind of secret.
+  final String secretLabel;
+
   final TextInputType? keyboardType;
   final TextInputAction textInputAction;
   final ValueChanged<String>? onChanged;
@@ -200,11 +207,14 @@ class _TMTextFieldState extends State<TMTextField> {
                 ? Padding(
                     padding: const EdgeInsets.only(right: Space.xs),
                     child: Tooltip(
-                      message: _revealed ? 'Hide password' : 'Show password',
+                      message: _revealed
+                          ? 'Hide ${widget.secretLabel}'
+                          : 'Show ${widget.secretLabel}',
                       child: TMFocusable(
                         onTap: () => setState(() => _revealed = !_revealed),
-                        semanticLabel:
-                            _revealed ? 'Hide password' : 'Show password',
+                        semanticLabel: _revealed
+                            ? 'Hide ${widget.secretLabel}'
+                            : 'Show ${widget.secretLabel}',
                         builder: (BuildContext context, TMState s) =>
                             TMFocusRing(
                           focused: s.focused,
@@ -669,6 +679,116 @@ class _Tag extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// A single consent/selection row. The whole row is the target, the tick is
+/// drawn rather than supplied by Material so it keeps the printed-form
+/// vocabulary of the rest of the controls.
+class TMCheckbox extends StatelessWidget {
+  const TMCheckbox({
+    required this.value,
+    required this.onChanged,
+    required this.label,
+    this.helper,
+    this.error,
+    super.key,
+  });
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final String label;
+  final String? helper;
+  final String? error;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool bad = error != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        TMFocusable(
+          onTap: () => onChanged(!value),
+          semanticLabel: label,
+          semanticButton: false,
+          semanticSelected: value,
+          builder: (BuildContext context, TMState s) {
+            final Color line = bad
+                ? AppColors.alert
+                : value
+                    ? AppColors.accent
+                    : AppColors.ruleStrong;
+            return TMFocusRing(
+              focused: s.focused,
+              radius: Radii.sharp,
+              child: AnimatedContainer(
+                duration: Motion.fast,
+                curve: Motion.ease,
+                constraints: const BoxConstraints(minHeight: Hit.min),
+                padding: const EdgeInsets.symmetric(vertical: Space.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    AnimatedContainer(
+                      duration: Motion.fast,
+                      curve: Motion.ease,
+                      width: 22,
+                      height: 22,
+                      margin: const EdgeInsets.only(top: 1),
+                      decoration: BoxDecoration(
+                        color: value
+                            ? AppColors.accent
+                            : s.hovered
+                                ? AppColors.paperSunken
+                                : AppColors.paperRaised,
+                        borderRadius: Radii.sharpAll,
+                        border: Border.all(
+                          color: line,
+                          width: value ? 1.5 : 1,
+                        ),
+                      ),
+                      child: value
+                          ? const TMIcon(
+                              TMIconName.check,
+                              size: 14,
+                              color: AppColors.onAccent,
+                              strokeWidth: 2,
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: Space.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            label,
+                            style: AppType.body.tone(
+                              value ? AppColors.ink : AppColors.inkSecondary,
+                            ),
+                          ),
+                          if (helper != null) ...<Widget>[
+                            const SizedBox(height: Space.xs),
+                            Text(helper!, style: AppType.bodySmall.quieter),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        if (error != null) ...<Widget>[
+          const SizedBox(height: Space.xs),
+          Text(
+            error!,
+            style: AppType.bodySmall.tone(AppColors.alert),
+          ),
+        ],
+      ],
     );
   }
 }

@@ -23,6 +23,7 @@ from ..models.profile import (
 from ..models.user import Role, User
 from ..repositories.interfaces import ProfileRepository, UserRepository
 from ..storage.photos import PhotoStorage, StoredPhoto
+from ..transactions import TransactionFactory, no_transaction
 from .photo_processing import OUTPUT_CONTENT_TYPE, reencode_photo
 
 
@@ -69,19 +70,22 @@ class ProfileService:
         profiles: ProfileRepository,
         catalog: Catalog,
         photos: PhotoStorage,
+        transaction: TransactionFactory | None = None,
     ) -> None:
         self._users = users
         self._profiles = profiles
         self._catalog = catalog
         self._photos = photos
+        self._transaction = transaction or no_transaction
         # A profile update is a read-modify-write operation. Serialise it so
         # two simultaneous edits cannot silently discard one another.
         self._lock = threading.RLock()
 
     def get_own(self, user: User) -> OwnProfile:
         with self._lock:
-            profile = self._get_or_create(user)
-            return self._own_view(user, profile)
+            with self._transaction():
+                profile = self._get_or_create(user)
+                return self._own_view(user, profile)
 
     def update_profile(
         self,
@@ -90,21 +94,22 @@ class ProfileService:
     ) -> OwnProfile:
         updates = payload.model_dump(exclude_unset=True)
         with self._lock:
-            profile = self._get_or_create(user)
-            normalized = self._normalize_updates(user, updates)
-            updated = profile.model_copy(
-                update={
-                    **normalized,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            )
-            self._profiles.update(updated)
-            user = self._sync_user(
-                user,
-                updated,
-                name_changed="name" in normalized,
-            )
-            return self._own_view(user, updated)
+            with self._transaction():
+                profile = self._get_or_create(user)
+                normalized = self._normalize_updates(user, updates)
+                updated = profile.model_copy(
+                    update={
+                        **normalized,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                )
+                self._profiles.update(updated)
+                user = self._sync_user(
+                    user,
+                    updated,
+                    name_changed="name" in normalized,
+                )
+                return self._own_view(user, updated)
 
     def update_subjects(
         self,
@@ -129,13 +134,14 @@ class ProfileService:
     def upload_photo(self, user: User, data: bytes) -> OwnProfile:
         encoded = reencode_photo(data)
         with self._lock:
-            profile = self._get_or_create(user)
-            self._photos.save(
-                user.id,
-                encoded,
-                content_type=OUTPUT_CONTENT_TYPE,
-            )
-            return self._own_view(user, profile)
+            with self._transaction():
+                profile = self._get_or_create(user)
+                self._photos.save(
+                    user.id,
+                    encoded,
+                    content_type=OUTPUT_CONTENT_TYPE,
+                )
+                return self._own_view(user, profile)
 
     def delete_photo(self, user: User) -> None:
         with self._lock:

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .user import UserMe
 
@@ -31,3 +32,19 @@ class TokenResponse(BaseModel):
 
 class AuthResponse(TokenResponse):
     user: UserMe
+
+
+class LoginOTPChallengeResponse(BaseModel):
+    """Returned instead of tokens when email OTP login is required."""
+
+    otp_required: Literal[True] = True
+    challenge_id: str
+    expires_at: datetime
+    message: str = "Enter the 6-digit code sent to your email."
+
+
+class LoginOTPVerifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    challenge_id: str = Field(min_length=1, max_length=256)
+    code: str = Field(min_length=6, max_length=6)

@@ -2,6 +2,16 @@ import 'package:tutormatch/data/api_client.dart';
 import 'package:tutormatch/data/models.dart';
 import 'package:tutormatch/theme/app_theme.dart';
 
+class LoginOtpRequired implements Exception {
+  const LoginOtpRequired({
+    required this.challengeId,
+    this.expiresAt,
+  });
+
+  final String challengeId;
+  final DateTime? expiresAt;
+}
+
 class AuthRepository {
   const AuthRepository(this.api);
 
@@ -14,6 +24,27 @@ class AuthRepository {
     final Map<String, dynamic> json = jsonObject(await api.postJson(
       '/auth/login',
       body: <String, String>{'email': email, 'password': password},
+      auth: false,
+    ));
+    if (json['otp_required'] == true) {
+      throw LoginOtpRequired(
+        challengeId: jsonString(json['challenge_id']),
+        expiresAt: jsonDate(json['expires_at']),
+      );
+    }
+    return _store(AuthSession.fromJson(json));
+  }
+
+  Future<AuthSession> verifyLoginOtp({
+    required String challengeId,
+    required String code,
+  }) async {
+    final Map<String, dynamic> json = jsonObject(await api.postJson(
+      '/auth/login/otp/verify',
+      body: <String, String>{
+        'challenge_id': challengeId,
+        'code': code,
+      },
       auth: false,
     ));
     return _store(AuthSession.fromJson(json));

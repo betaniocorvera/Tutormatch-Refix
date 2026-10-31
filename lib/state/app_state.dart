@@ -231,6 +231,23 @@ class AppState extends ChangeNotifier {
     return session.user;
   }
 
+  Future<UserAccount> verifyLoginOtp({
+    required String challengeId,
+    required String code,
+  }) async {
+    final AuthSession session = await _auth.verifyLoginOtp(
+      challengeId: challengeId,
+      code: code,
+    );
+    _user = session.user;
+    _signedIn = true;
+    _role = session.user.role;
+    _startupError = null;
+    notifyListeners();
+    await _afterAuth();
+    return session.user;
+  }
+
   Future<UserAccount> register({
     required String email,
     required String password,

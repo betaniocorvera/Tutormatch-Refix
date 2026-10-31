@@ -8,6 +8,8 @@ response rather than learning that a conversation exists.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -16,6 +18,7 @@ from ..catalog import Catalog
 from ..errors import (
     ConversationLocked,
     ConversationNotFound,
+    DuplicateConversationError,
     Forbidden,
     InvalidMessage,
     InvalidPagination,
@@ -60,6 +63,7 @@ from ..models.profile import Profile
 from ..models.user import Role, User
 from ..repositories.interfaces import ConversationRepository, UserRepository
 from ..storage.chat_media import ChatMediaStorage
+from ..transactions import TransactionFactory, no_transaction
 from .broadcast import ConversationBroadcaster
 from .chat_media import (
     PreparedImage,
@@ -92,6 +96,7 @@ class ChatService:
         catalog: Catalog,
         media: ChatMediaStorage,
         broadcaster: ConversationBroadcaster | None = None,
+        transaction: TransactionFactory | None = None,
     ) -> None:
         self._users = users
         self._conversations = conversations
@@ -100,7 +105,16 @@ class ChatService:
         self._catalog = catalog
         self._media = media
         self._broadcaster = broadcaster
+        self._transaction = transaction or no_transaction
         self._lock = threading.RLock()
+
+    @contextmanager
+    def _mutation(self) -> Iterator[None]:
+        """Serialise a mutation and make its database writes atomic."""
+
+        with self._lock:
+            with self._transaction():
+                yield
 
     # ── Requests ──────────────────────────────────────────────────────────
 
@@ -109,7 +123,7 @@ class ChatService:
         user: User,
         payload: CreateRequest,
     ) -> RequestSummary:
-        with self._lock:
+        with self._mutation():
             counterpart = self._users.get_by_id(payload.counterpart_id)
             if counterpart is None:
                 raise UserNotFound()
@@ -221,7 +235,10 @@ class ChatService:
                 message=message,
                 request_status=RequestStatus.pending,
             )
-            self._conversations.add(conversation)
+            try:
+                self._conversations.add(conversation)
+            except DuplicateConversationError as exc:
+                raise RequestAlreadyExists() from exc
             self._publish(event)
             return self._request_summary(conversation, user)
 
@@ -283,7 +300,7 @@ class ChatService:
         request_id: str,
         payload: AcceptRequest | None = None,
     ) -> RequestSummary:
-        with self._lock:
+        with self._mutation():
             conversation = self._get_conversation(
                 user,
                 request_id,
@@ -329,7 +346,7 @@ class ChatService:
         request_id: str,
         payload: DeclineRequest,
     ) -> RequestSummary:
-        with self._lock:
+        with self._mutation():
             conversation = self._get_conversation(
                 user,
                 request_id,
@@ -485,7 +502,7 @@ class ChatService:
         conversation_id: str,
         payload: SendTextRequest,
     ) -> MessageView:
-        with self._lock:
+        with self._mutation():
             conversation = self._get_accepted(user, conversation_id)
             message = self._append_message(
                 conversation,
@@ -534,7 +551,7 @@ class ChatService:
         conversation_id: str,
         payload: SimulatedVoiceRequest,
     ) -> MessageView:
-        with self._lock:
+        with self._mutation():
             conversation = self._get_accepted(user, conversation_id)
             message = self._append_message(
                 conversation,
@@ -566,7 +583,7 @@ class ChatService:
         if proposed_utc > now + timedelta(days=366):
             raise InvalidMessage("Choose a time within the next year.")
 
-        with self._lock:
+        with self._mutation():
             conversation = self._get_accepted(user, conversation_id)
             message = self._append_message(
                 conversation,
@@ -594,7 +611,7 @@ class ChatService:
         payload: SessionResponseRequest,
     ) -> MessageView:
         state = SessionState(payload.state)
-        with self._lock:
+        with self._mutation():
             conversation = self._get_accepted(user, conversation_id)
             index = next(
                 (
@@ -644,7 +661,7 @@ class ChatService:
         conversation_id: str,
         payload: CallEventRequest,
     ) -> MessageView:
-        with self._lock:
+        with self._mutation():
             conversation = self._get_accepted(user, conversation_id)
             message = self._append_message(
                 conversation,
@@ -675,7 +692,7 @@ class ChatService:
         conversation_id: str,
         payload: MarkReadRequest | None = None,
     ) -> ReadState:
-        with self._lock:
+        with self._mutation():
             conversation = self._get_conversation(user, conversation_id)
             latest = conversation.next_message_sequence - 1
             current = conversation.last_read_sequences.get(user.id, 0)
@@ -800,7 +817,7 @@ class ChatService:
         prepared: PreparedImage | PreparedVoice,
     ) -> MessageView:
         is_image = isinstance(prepared, PreparedImage)
-        with self._lock:
+        with self._mutation():
             conversation = self._get_accepted(user, conversation_id)
             media_key = str(uuid4())
             self._media.save(media_key, prepared.data)

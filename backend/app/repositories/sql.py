@@ -32,7 +32,7 @@ from ..db.models import (
     SecurityAnswerRow,
     UserRow,
 )
-from ..errors import DuplicateEmailError
+from ..errors import DuplicateConversationError, DuplicateEmailError
 from ..models.auth import RefreshToken
 from ..models.chat import (
     CallKind,
@@ -69,6 +69,15 @@ def _is_email_conflict(exc: IntegrityError) -> bool:
         "ix_users_email" in text
         or "users_email" in text
         or ("duplicate key" in text and "email" in text)
+    )
+
+
+def _is_conversation_conflict(exc: IntegrityError) -> bool:
+    text = str(exc.orig).lower()
+    return (
+        "uq_conversations_student_tutor" in text
+        or "conversations_pkey" in text
+        or ("duplicate key" in text and "conversations" in text)
     )
 
 
@@ -466,7 +475,7 @@ class SqlUserRepository(UserRepository):
         self._database = database
 
     def get_by_id(self, user_id: str) -> User | None:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             row = session.execute(
                 _user_statement().where(UserRow.id == user_id)
             ).scalar_one_or_none()
@@ -474,7 +483,7 @@ class SqlUserRepository(UserRepository):
 
     def get_by_email(self, email: str) -> User | None:
         normalized = _normalized_email(email)
-        with self._database.session() as session:
+        with self._database.operation() as session:
             row = session.execute(
                 _user_statement().where(
                     func.lower(UserRow.email) == normalized
@@ -485,7 +494,7 @@ class SqlUserRepository(UserRepository):
     def add(self, user: User) -> None:
         email = _normalized_email(user.email)
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 if session.get(UserRow, user.id) is not None:
                     raise ValueError(f"User already exists: {user.id}")
                 if (
@@ -508,7 +517,7 @@ class SqlUserRepository(UserRepository):
     def update(self, user: User) -> None:
         email = _normalized_email(user.email)
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 row = session.get(UserRow, user.id)
                 if row is None:
                     raise KeyError(f"Unknown user: {user.id}")
@@ -539,13 +548,14 @@ class SqlUserRepository(UserRepository):
                     .execution_options(synchronize_session=False)
                 )
                 session.add_all(_security_answer_rows(user))
+                session.flush()
         except IntegrityError as exc:
             if _is_email_conflict(exc):
                 raise DuplicateEmailError(email) from exc
             raise
 
     def list_all(self) -> list[User]:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             rows = (
                 session.execute(
                     _user_statement().order_by(
@@ -564,7 +574,7 @@ class SqlUserRepository(UserRepository):
     def import_state(self, state: list[dict[str, Any]]) -> None:
         users = [User.model_validate(item) for item in state]
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 session.execute(
                     delete(UserRow).execution_options(
                         synchronize_session=False
@@ -583,12 +593,12 @@ class SqlProfileRepository(ProfileRepository):
         self._database = database
 
     def get_by_user_id(self, user_id: str) -> Profile | None:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             row = session.get(ProfileRow, user_id)
             return _profile_from_row(row) if row is not None else None
 
     def add(self, profile: Profile) -> None:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             if session.get(ProfileRow, profile.user_id) is not None:
                 raise ValueError(
                     f"Profile already exists for user: {profile.user_id}"
@@ -596,18 +606,20 @@ class SqlProfileRepository(ProfileRepository):
             if session.get(UserRow, profile.user_id) is None:
                 raise ValueError(f"Unknown user: {profile.user_id}")
             session.add(_profile_row(profile))
+            session.flush()
 
     def update(self, profile: Profile) -> None:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             row = session.get(ProfileRow, profile.user_id)
             if row is None:
                 raise KeyError(
                     f"Unknown profile for user: {profile.user_id}"
                 )
             _apply_profile(row, profile)
+            session.flush()
 
     def list_all(self) -> list[Profile]:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             rows = (
                 session.execute(
                     select(ProfileRow).order_by(
@@ -629,13 +641,14 @@ class SqlProfileRepository(ProfileRepository):
     def import_state(self, state: list[dict[str, Any]]) -> None:
         profiles = [Profile.model_validate(item) for item in state]
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 session.execute(
                     delete(ProfileRow).execution_options(
                         synchronize_session=False
                     )
                 )
                 session.add_all([_profile_row(profile) for profile in profiles])
+                session.flush()
         except IntegrityError as exc:
             raise ValueError("Could not import profiles") from exc
 
@@ -646,25 +659,31 @@ class SqlRefreshTokenRepository(RefreshTokenRepository):
 
     def add(self, token: RefreshToken) -> None:
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 if session.get(RefreshTokenRow, token.jti) is not None:
                     raise ValueError(
                         f"Duplicate refresh token id: {token.jti}"
                     )
                 session.add(_refresh_token_row(token))
+                session.flush()
         except IntegrityError as exc:
             raise ValueError(
                 f"Could not store refresh token: {token.jti}"
             ) from exc
 
     def get_by_jti(self, jti: str) -> RefreshToken | None:
-        with self._database.session() as session:
-            row = session.get(RefreshTokenRow, jti)
+        with self._database.operation() as session:
+            statement = select(RefreshTokenRow).where(
+                RefreshTokenRow.jti == jti
+            )
+            if self._database.in_transaction:
+                statement = statement.with_for_update()
+            row = session.execute(statement).scalar_one_or_none()
             return _refresh_token_from_row(row) if row is not None else None
 
     def revoke(self, jti: str, *, replaced_by_jti: str | None = None) -> None:
         now = datetime.now(timezone.utc)
-        with self._database.session() as session:
+        with self._database.operation() as session:
             session.execute(
                 update(RefreshTokenRow)
                 .where(
@@ -680,7 +699,7 @@ class SqlRefreshTokenRepository(RefreshTokenRepository):
 
     def revoke_all_for_user(self, user_id: str) -> None:
         now = datetime.now(timezone.utc)
-        with self._database.session() as session:
+        with self._database.operation() as session:
             session.execute(
                 update(RefreshTokenRow)
                 .where(
@@ -692,7 +711,7 @@ class SqlRefreshTokenRepository(RefreshTokenRepository):
             )
 
     def list_all(self) -> list[RefreshToken]:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             rows = (
                 session.execute(
                     select(RefreshTokenRow).order_by(
@@ -711,13 +730,14 @@ class SqlRefreshTokenRepository(RefreshTokenRepository):
     def import_state(self, state: list[dict[str, Any]]) -> None:
         tokens = [RefreshToken.model_validate(item) for item in state]
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 session.execute(
                     delete(RefreshTokenRow).execution_options(
                         synchronize_session=False
                     )
                 )
                 session.add_all([_refresh_token_row(token) for token in tokens])
+                session.flush()
         except IntegrityError as exc:
             raise ValueError("Could not import refresh tokens") from exc
 
@@ -727,12 +747,13 @@ class SqlConversationRepository(ConversationRepository):
         self._database = database
 
     def get_by_id(self, conversation_id: str) -> Conversation | None:
-        with self._database.session() as session:
-            row = session.execute(
-                _conversation_statement().where(
-                    ConversationRow.id == conversation_id
-                )
-            ).scalar_one_or_none()
+        with self._database.operation() as session:
+            statement = _conversation_statement().where(
+                ConversationRow.id == conversation_id
+            )
+            if self._database.in_transaction:
+                statement = statement.with_for_update()
+            row = session.execute(statement).scalar_one_or_none()
             return _conversation_from_row(row) if row is not None else None
 
     def get_between(
@@ -742,28 +763,29 @@ class SqlConversationRepository(ConversationRepository):
     ) -> Conversation | None:
         if first_user_id == second_user_id:
             return None
-        with self._database.session() as session:
-            row = session.execute(
-                _conversation_statement().where(
-                    or_(
-                        and_(
-                            ConversationRow.student_id == first_user_id,
-                            ConversationRow.tutor_id == second_user_id,
-                        ),
-                        and_(
-                            ConversationRow.student_id == second_user_id,
-                            ConversationRow.tutor_id == first_user_id,
-                        ),
-                    )
+        with self._database.operation() as session:
+            statement = _conversation_statement().where(
+                or_(
+                    and_(
+                        ConversationRow.student_id == first_user_id,
+                        ConversationRow.tutor_id == second_user_id,
+                    ),
+                    and_(
+                        ConversationRow.student_id == second_user_id,
+                        ConversationRow.tutor_id == first_user_id,
+                    ),
                 )
-            ).scalar_one_or_none()
+            )
+            if self._database.in_transaction:
+                statement = statement.with_for_update()
+            row = session.execute(statement).scalar_one_or_none()
             return _conversation_from_row(row) if row is not None else None
 
     def add(self, conversation: Conversation) -> None:
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 if session.get(ConversationRow, conversation.id) is not None:
-                    raise ValueError(
+                    raise DuplicateConversationError(
                         f"Conversation already exists: {conversation.id}"
                     )
                 if (
@@ -775,58 +797,181 @@ class SqlConversationRepository(ConversationRepository):
                     ).scalar_one_or_none()
                     is not None
                 ):
-                    raise ValueError(
+                    raise DuplicateConversationError(
                         "A conversation already exists for this pair"
                     )
                 session.add(_conversation_row(conversation))
+                session.flush()
         except IntegrityError as exc:
-            raise ValueError(
-                f"Conversation already exists: {conversation.id}"
-            ) from exc
+            if _is_conversation_conflict(exc):
+                raise DuplicateConversationError(
+                    f"Conversation already exists: {conversation.id}"
+                ) from exc
+            raise
 
     def update(self, conversation: Conversation) -> None:
         try:
-            with self._database.session() as session:
-                row = session.get(ConversationRow, conversation.id)
+            with self._database.operation() as session:
+                row = session.execute(
+                    select(ConversationRow)
+                    .where(ConversationRow.id == conversation.id)
+                    .with_for_update()
+                ).scalar_one_or_none()
                 if row is None:
                     raise KeyError(
                         f"Unknown conversation: {conversation.id}"
                     )
 
                 _apply_conversation(row, conversation)
-                session.execute(
-                    delete(ConversationEventRow)
-                    .where(
-                        ConversationEventRow.conversation_id
-                        == conversation.id
-                    )
-                    .execution_options(synchronize_session=False)
-                )
-                session.execute(
-                    delete(ConversationReadRow)
-                    .where(
-                        ConversationReadRow.conversation_id
-                        == conversation.id
-                    )
-                    .execution_options(synchronize_session=False)
-                )
-                session.execute(
-                    delete(MessageRow)
-                    .where(MessageRow.conversation_id == conversation.id)
-                    .execution_options(synchronize_session=False)
-                )
-
                 messages, events, reads = _conversation_children(conversation)
-                session.add_all(messages)
-                session.add_all(events)
-                session.add_all(reads)
+
+                existing_messages = {
+                    message.id: message
+                    for message in session.execute(
+                        select(MessageRow).where(
+                            MessageRow.conversation_id == conversation.id
+                        )
+                    ).scalars()
+                }
+                existing_events = {
+                    event.sequence: event
+                    for event in session.execute(
+                        select(ConversationEventRow).where(
+                            ConversationEventRow.conversation_id
+                            == conversation.id
+                        )
+                    ).scalars()
+                }
+                existing_reads = {
+                    read.user_id: read
+                    for read in session.execute(
+                        select(ConversationReadRow).where(
+                            ConversationReadRow.conversation_id
+                            == conversation.id
+                        )
+                    ).scalars()
+                }
+
+                # Events reference messages, so remove obsolete events before
+                # removing messages. Append-only chats then update only the new
+                # rows instead of deleting and reinserting the whole thread.
+                incoming_event_sequences = {
+                    event.sequence for event in events
+                }
+                removed_event_sequences = (
+                    set(existing_events) - incoming_event_sequences
+                )
+                if removed_event_sequences:
+                    session.execute(
+                        delete(ConversationEventRow)
+                        .where(
+                            ConversationEventRow.conversation_id
+                            == conversation.id,
+                            ConversationEventRow.sequence.in_(
+                                removed_event_sequences
+                            ),
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+
+                incoming_message_ids = {
+                    message.id for message in messages
+                }
+                removed_message_ids = (
+                    set(existing_messages) - incoming_message_ids
+                )
+                if removed_message_ids:
+                    session.execute(
+                        delete(MessageRow)
+                        .where(MessageRow.id.in_(removed_message_ids))
+                        .execution_options(synchronize_session=False)
+                    )
+
+                for incoming in messages:
+                    existing = existing_messages.get(incoming.id)
+                    if existing is None:
+                        session.add(incoming)
+                        continue
+                    for key in (
+                        "conversation_id",
+                        "sender_id",
+                        "kind",
+                        "text",
+                        "sequence",
+                        "created_at",
+                        "media_key",
+                        "media_content_type",
+                        "media_size",
+                        "media_filename",
+                        "image_width",
+                        "image_height",
+                        "voice_seconds",
+                        "session_at",
+                        "session_state",
+                        "call_kind",
+                        "call_connected",
+                        "call_duration_seconds",
+                    ):
+                        value = getattr(incoming, key)
+                        if getattr(existing, key) != value:
+                            setattr(existing, key, value)
+
+                for incoming in events:
+                    existing = existing_events.get(incoming.sequence)
+                    if existing is None:
+                        session.add(incoming)
+                        continue
+                    for key in (
+                        "type",
+                        "actor_id",
+                        "created_at",
+                        "message_id",
+                        "request_status",
+                        "read_through_sequence",
+                        "session_state",
+                    ):
+                        value = getattr(incoming, key)
+                        if getattr(existing, key) != value:
+                            setattr(existing, key, value)
+
+                incoming_read_user_ids = {
+                    read.user_id for read in reads
+                }
+                removed_read_user_ids = (
+                    set(existing_reads) - incoming_read_user_ids
+                )
+                if removed_read_user_ids:
+                    session.execute(
+                        delete(ConversationReadRow)
+                        .where(
+                            ConversationReadRow.conversation_id
+                            == conversation.id,
+                            ConversationReadRow.user_id.in_(
+                                removed_read_user_ids
+                            ),
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                for incoming in reads:
+                    existing = existing_reads.get(incoming.user_id)
+                    if existing is None:
+                        session.add(incoming)
+                    elif existing.through_sequence != incoming.through_sequence:
+                        existing.through_sequence = incoming.through_sequence
+
+                session.flush()
         except IntegrityError as exc:
+            if _is_conversation_conflict(exc):
+                raise DuplicateConversationError(
+                    f"Conversation already exists for this pair: "
+                    f"{conversation.id}"
+                ) from exc
             raise ValueError(
                 f"Could not update conversation: {conversation.id}"
             ) from exc
 
     def list_all(self) -> list[Conversation]:
-        with self._database.session() as session:
+        with self._database.operation() as session:
             rows = (
                 session.execute(
                     _conversation_statement().order_by(
@@ -850,7 +995,7 @@ class SqlConversationRepository(ConversationRepository):
             Conversation.model_validate(item) for item in state
         ]
         try:
-            with self._database.session() as session:
+            with self._database.operation() as session:
                 session.execute(
                     delete(ConversationRow).execution_options(
                         synchronize_session=False
@@ -859,6 +1004,7 @@ class SqlConversationRepository(ConversationRepository):
                 session.add_all(
                     [_conversation_row(conversation) for conversation in conversations]
                 )
+                session.flush()
         except IntegrityError as exc:
             raise ValueError("Could not import conversations") from exc
 

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from ..errors import DuplicateEmailError
+from ..errors import DuplicateConversationError, DuplicateEmailError
 from ..models.auth import RefreshToken
 from ..models.chat import Conversation
 from ..models.profile import Profile
@@ -242,8 +242,20 @@ class InMemoryConversationRepository(ConversationRepository):
     def add(self, conversation: Conversation) -> None:
         with self._lock:
             if conversation.id in self._conversations:
-                raise ValueError(
+                raise DuplicateConversationError(
                     f"Conversation already exists: {conversation.id}"
+                )
+            pair = {conversation.student_id, conversation.tutor_id}
+            if any(
+                {
+                    existing.student_id,
+                    existing.tutor_id,
+                }
+                == pair
+                for existing in self._conversations.values()
+            ):
+                raise DuplicateConversationError(
+                    "A conversation already exists for this pair"
                 )
             self._conversations[conversation.id] = conversation
         self._on_change()

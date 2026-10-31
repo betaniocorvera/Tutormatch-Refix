@@ -99,6 +99,9 @@ class Settings:
     snapshot_debounce_seconds: float = 0.5
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 900
+    login_otp_required: bool = False
+    login_lockout_attempts: int = 5
+    login_lockout_seconds: int = 900
     cors_origins: tuple[str, ...] = ("http://localhost:8080",)
     secret_is_ephemeral: bool = False
     database_url: str = field(default="", repr=False)
@@ -126,6 +129,10 @@ class Settings:
             raise ValueError("LOGIN_RATE_LIMIT_ATTEMPTS must be positive")
         if self.login_rate_limit_window_seconds <= 0:
             raise ValueError("LOGIN_RATE_LIMIT_WINDOW_SECONDS must be positive")
+        if self.login_lockout_attempts <= 0:
+            raise ValueError("LOGIN_LOCKOUT_ATTEMPTS must be positive")
+        if self.login_lockout_seconds <= 0:
+            raise ValueError("LOGIN_LOCKOUT_SECONDS must be positive")
         if self.snapshot_debounce_seconds < 0:
             raise ValueError("SNAPSHOT_DEBOUNCE_SECONDS cannot be negative")
         for origin in self.cors_origins:
@@ -254,6 +261,9 @@ class Settings:
             login_rate_limit_window_seconds=_env_int(
                 "LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900
             ),
+            login_otp_required=_env_bool("LOGIN_OTP_REQUIRED", False),
+            login_lockout_attempts=_env_int("LOGIN_LOCKOUT_ATTEMPTS", 5),
+            login_lockout_seconds=_env_int("LOGIN_LOCKOUT_SECONDS", 900),
             cors_origins=cors_origins,
             database_url=os.getenv("DATABASE_URL", ""),
             test_database_url=os.getenv("TEST_DATABASE_URL", ""),

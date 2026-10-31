@@ -115,6 +115,24 @@ def test_storage_backend_must_be_known() -> None:
         Settings(jwt_secret="s" * 64, storage_backend="sqlite")
 
 
+def test_from_env_reads_login_security_settings(monkeypatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", "s" * 64)
+    monkeypatch.setenv("LOGIN_OTP_REQUIRED", "true")
+    monkeypatch.setenv("LOGIN_LOCKOUT_ATTEMPTS", "7")
+    monkeypatch.setenv("LOGIN_LOCKOUT_SECONDS", "120")
+
+    settings = Settings.from_env()
+
+    assert settings.login_otp_required is True
+    assert settings.login_lockout_attempts == 7
+    assert settings.login_lockout_seconds == 120
+
+
+def test_login_lockout_attempts_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="LOGIN_LOCKOUT_ATTEMPTS"):
+        Settings(jwt_secret="s" * 64, login_lockout_attempts=0)
+
+
 def test_from_env_reads_storage_backend(monkeypatch) -> None:
     monkeypatch.setenv("JWT_SECRET", "s" * 64)
     monkeypatch.setenv("STORAGE_BACKEND", "postgres")

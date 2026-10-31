@@ -32,7 +32,15 @@ from .security import PasswordHasher, TokenService
 from .services.auth import AuthService
 from .services.broadcast import ConversationBroadcaster
 from .services.chat import ChatService
+from .services.lockout import AccountLockout
 from .services.matching import MatchingService
+from .services.security_events import SecurityEventService
+from .services.verification import (
+    CAPTCHAService,
+    EmailOTPService,
+    LoginOTPChallengeService,
+)
+
 from .services.profile import ProfileService
 from .services.rate_limit import LoginRateLimiter
 from .storage.chat_media import (
@@ -45,6 +53,7 @@ from .storage.photos import (
     LocalPhotoStorage,
     PhotoStorage,
 )
+from .transactions import no_transaction
 
 
 class AppContainer:
@@ -92,6 +101,11 @@ class AppContainer:
             snapshot.register("conversations", self.conversations)
             snapshot.load()
         self.snapshot = snapshot
+        self.transaction = (
+            self.database.transaction
+            if self.database is not None
+            else no_transaction
+        )
 
         self.catalog: Catalog = get_catalog()
         photos: PhotoStorage
@@ -113,6 +127,14 @@ class AppContainer:
             settings.login_rate_limit_attempts,
             settings.login_rate_limit_window_seconds,
         )
+        self.account_lockout = AccountLockout(
+            settings.login_lockout_attempts,
+            settings.login_lockout_seconds,
+        )
+        self.security_events = SecurityEventService()
+        self.captcha = CAPTCHAService()
+        self.email_otp = EmailOTPService()
+        self.login_otp_challenges = LoginOTPChallengeService()
         self.auth = AuthService(
             users=self.users,
             profiles=self.profiles,
@@ -121,12 +143,19 @@ class AppContainer:
             tokens=self.tokens,
             rate_limiter=self.login_rate_limiter,
             catalog=self.catalog,
+            transaction=self.transaction,
+            account_lockout=self.account_lockout,
+            security_events=self.security_events,
+            email_otp=self.email_otp,
+            login_otp_challenges=self.login_otp_challenges,
+            login_otp_required=settings.login_otp_required,
         )
         self.profile = ProfileService(
             users=self.users,
             profiles=self.profiles,
             catalog=self.catalog,
             photos=self.photos,
+            transaction=self.transaction,
         )
         self.matching = MatchingService(
             users=self.users,
@@ -143,6 +172,7 @@ class AppContainer:
             catalog=self.catalog,
             media=self.chat_media,
             broadcaster=self.broadcaster,
+            transaction=self.transaction,
         )
 
     def close(self) -> None:

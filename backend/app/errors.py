@@ -153,6 +153,16 @@ class AttachmentTooLarge(AppError):
     detail = "That attachment is too large."
 
 
+class InvalidCaptcha(AppError):
+    status_code = 422
+    detail = "The CAPTCHA challenge was wrong or expired."
+
+
+class InvalidEmailVerification(AppError):
+    status_code = 422
+    detail = "That verification code is wrong, expired, or already used."
+
+
 class Forbidden(AppError):
     status_code = 403
     detail = "You do not have access to that."
@@ -162,15 +172,24 @@ class RateLimited(AppError):
     status_code = 429
     detail = "Too many sign-in attempts. Try again later."
 
-    def __init__(self, retry_after: int) -> None:
+    def __init__(
+        self,
+        retry_after: int,
+        detail: str | None = None,
+    ) -> None:
         self.retry_after = max(1, retry_after)
         super().__init__(
+            detail,
             headers={"Retry-After": str(self.retry_after)},
         )
 
 
 class DuplicateEmailError(Exception):
     """Repository-level conflict raised when an email is already stored."""
+
+
+class DuplicateConversationError(ValueError):
+    """Repository-level conflict raised when a pair already has a thread."""
 
 
 def _validation_errors(exc: RequestValidationError) -> list[dict[str, object]]:

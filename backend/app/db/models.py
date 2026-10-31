@@ -102,6 +102,15 @@ class UserRow(Base):
     )
 
 
+# The application stores normalized email addresses, but this expression index
+# also protects rows written by maintenance scripts or future clients.
+Index(
+    "uq_users_email_lower",
+    func.lower(UserRow.email),
+    unique=True,
+)
+
+
 class SecurityAnswerRow(Base):
     __tablename__ = "security_answers"
 

@@ -9,12 +9,26 @@ for readiness probes.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar, Token
 from typing import Iterator
 
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings
+
+# A repository method normally owns its own short transaction. Services that
+# need several repository calls to succeed or fail together open an explicit
+# transaction; repositories then join the session stored here instead of
+# committing one call at a time.
+_current_session: ContextVar[Session | None] = ContextVar(
+    "tutormatch_current_session",
+    default=None,
+)
+_transaction_active: ContextVar[bool] = ContextVar(
+    "tutormatch_transaction_active",
+    default=False,
+)
 
 
 class Database:
@@ -68,6 +82,63 @@ class Database:
         finally:
             session.close()
 
+    @property
+    def in_transaction(self) -> bool:
+        """Whether an explicit service transaction is active."""
+
+        return _transaction_active.get()
+
+    @contextmanager
+    def operation(self) -> Iterator[Session]:
+        """Yield the transaction session, or own one for a single operation.
+
+        Repository methods use this instead of ``session()``. When a service
+        opened ``transaction()``, every repository call joins that transaction
+        and the service decides when to commit. Outside one, the method still
+        gets a short-lived transaction with the same commit-on-success
+        behavior as before.
+        """
+
+        current = _current_session.get()
+        if current is not None:
+            yield current
+            return
+
+        session = self._session_factory()
+        token = _current_session.set(session)
+        try:
+            yield session
+            session.commit()
+        except BaseException:
+            session.rollback()
+            raise
+        finally:
+            _current_session.reset(token)
+            session.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Run several repository calls as one commit or rollback unit."""
+
+        current = _current_session.get()
+        if current is not None:
+            yield
+            return
+
+        session = self._session_factory()
+        session_token = _current_session.set(session)
+        active_token = _transaction_active.set(True)
+        try:
+            yield
+            session.commit()
+        except BaseException:
+            session.rollback()
+            raise
+        finally:
+            _transaction_active.reset(active_token)
+            _current_session.reset(session_token)
+            session.close()
+
     def unit_of_work(self) -> "UnitOfWork":
         return UnitOfWork(self._session_factory)
 
@@ -84,14 +155,18 @@ class Database:
 class UnitOfWork:
     """One transaction spanning one or more repositories.
 
-    Repositories should receive ``uow.session`` so a multi-table operation,
-    such as registration or accepting a request, commits or rolls back as one
-    unit.
+    Repositories automatically join the active session, so a multi-table
+    operation such as registration or accepting a request commits or rolls
+    back as one unit. ``uow.session`` remains available for code that needs
+    raw SQLAlchemy access inside the scope.
     """
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
         self._session: Session | None = None
+        self._owns_session = False
+        self._session_token: Token[Session | None] | None = None
+        self._active_token: Token[bool] | None = None
 
     @property
     def session(self) -> Session:
@@ -102,7 +177,16 @@ class UnitOfWork:
         return self._session
 
     def __enter__(self) -> "UnitOfWork":
+        current = _current_session.get()
+        if current is not None:
+            self._session = current
+            self._owns_session = False
+            return self
+
         self._session = self._session_factory()
+        self._owns_session = True
+        self._session_token = _current_session.set(self._session)
+        self._active_token = _transaction_active.set(True)
         return self
 
     def __exit__(
@@ -113,14 +197,25 @@ class UnitOfWork:
     ) -> None:
         if self._session is None:
             return
+        if not self._owns_session:
+            self._session = None
+            return
+
         try:
             if exc_type is None:
                 self._session.commit()
             else:
                 self._session.rollback()
         finally:
+            if self._active_token is not None:
+                _transaction_active.reset(self._active_token)
+            if self._session_token is not None:
+                _current_session.reset(self._session_token)
             self._session.close()
             self._session = None
+            self._owns_session = False
+            self._session_token = None
+            self._active_token = None
 
     def commit(self) -> None:
         self.session.commit()

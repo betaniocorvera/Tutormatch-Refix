@@ -20,6 +20,7 @@ from .routers import (
     profile,
     requests,
     users,
+    verification,
     ws,
 )
 
@@ -59,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(matches.router)
     app.include_router(requests.router)
     app.include_router(conversations.router)
+    app.include_router(verification.router)
     app.include_router(ws.router)
     return app
 

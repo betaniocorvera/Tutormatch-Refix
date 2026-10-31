@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from ..dependencies import AuthServiceDep, CurrentUser
-from ..models.auth import AuthResponse
+from ..models.auth import (
+    AuthResponse,
+    LoginOTPChallengeResponse,
+    LoginOTPVerifyRequest,
+)
 from ..models.user import (
     LoginRequest,
     LogoutRequest,
@@ -14,6 +19,7 @@ from ..models.user import (
     UserMe,
 )
 from ..services.auth import AuthResult, AuthService
+from ..services.verification import LoginOTPChallenge
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -55,16 +61,43 @@ def register(
     return _auth_response(result, auth)
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post(
+    "/login",
+    response_model=AuthResponse | LoginOTPChallengeResponse,
+)
 def login(
     payload: LoginRequest,
     request: Request,
     auth: AuthServiceDep,
-) -> AuthResponse:
+) -> AuthResponse | JSONResponse:
     client_key = request.client.host if request.client else "unknown"
     result = auth.login(
         email=str(payload.email),
         password=payload.password,
+        client_key=client_key,
+    )
+    if isinstance(result, LoginOTPChallenge):
+        challenge = LoginOTPChallengeResponse(
+            challenge_id=result.challenge_id,
+            expires_at=result.expires_at,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=challenge.model_dump(mode="json"),
+        )
+    return _auth_response(result, auth)
+
+
+@router.post("/login/otp/verify", response_model=AuthResponse)
+def verify_login_otp(
+    payload: LoginOTPVerifyRequest,
+    request: Request,
+    auth: AuthServiceDep,
+) -> AuthResponse:
+    client_key = request.client.host if request.client else "unknown"
+    result = auth.verify_login_otp(
+        challenge_id=payload.challenge_id,
+        code=payload.code,
         client_key=client_key,
     )
     return _auth_response(result, auth)

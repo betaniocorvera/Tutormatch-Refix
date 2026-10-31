@@ -18,7 +18,10 @@ the Flutter web development CORS origin. Phase 6 adds the confirmed,
 development-only demo seed and the final setup/reset documentation. Phase 7
 adds optional PostgreSQL persistence through SQLAlchemy, psycopg 3, and Alembic
 while keeping the in-memory repositories as the default for local work and
-tests.
+tests. Phase 8 hardens the PostgreSQL path with explicit service transactions,
+row locking for concurrent chat and refresh-token writes, readiness probes,
+container/CI deployment assets, and a transactional JSON-to-PostgreSQL cutover
+importer.
 
 Data lives in memory by default. Set `PERSIST_TO_FILE=true` to keep a debounced,
 atomic JSON snapshot at `data/store.json`; that snapshot includes users,
@@ -73,6 +76,19 @@ Matching still runs in Python with scikit-learn; PostgreSQL stores the source
 data but the KNN ranking is not moved into the database and `pgvector` is not
 required.
 
+Repository calls normally own a short transaction. Registration, refresh-token
+rotation, profile edits, and chat mutations wrap several repository calls in one
+service transaction, so a failure rolls the whole operation back. Conversation
+and refresh-token rows are locked during mutations so two API processes cannot
+append the same message sequence or rotate the same refresh token twice.
+Conversation updates diff the child rows instead of deleting and reinserting the
+whole thread.
+
+`GET /health` is a liveness probe. `GET /ready` checks the configured storage;
+the PostgreSQL mode returns `503` with `{"status":"not_ready"}` when the database
+cannot answer a query, without exposing connection details. The memory backend
+always reports ready.
+
 The integration tests use `TEST_DATABASE_URL` and are skipped when it is not
 set. Point it at a dedicated test database because the tests create and drop
 the TutorMatch tables:
@@ -82,6 +98,34 @@ $env:TEST_DATABASE_URL="postgresql+psycopg://tutormatch:change-me@localhost:5432
 .\.venv\Scripts\python.exe -m pytest tests\test_sql_repositories.py -q
 ```
 
+The full suite also runs against PostgreSQL when `TEST_DATABASE_URL` is set.
+GitHub Actions does this in `.github/workflows/backend-postgres.yml`, including
+an Alembic upgrade/downgrade/upgrade check before the tests.
+
+### Cutover from a JSON snapshot
+
+If the existing deployment uses `PERSIST_TO_FILE=true`, stop the old API first
+and take a backup of `data/store.json`. Apply the schema to the target database,
+then validate the snapshot without writing:
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m scripts.import_snapshot --snapshot data/store.json --dry-run
+```
+
+Import it with an explicit confirmation (or `--yes` for an unattended cutover):
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.import_snapshot --snapshot data/store.json --yes
+```
+
+The importer validates the four snapshot lists, refuses a non-empty target
+unless `--replace` is passed (take a database backup first), and writes users,
+profiles, refresh tokens, and conversations inside one transaction. It verifies the committed row counts
+against the snapshot and exits non-zero on any validation or constraint failure.
+Start the API with `STORAGE_BACKEND=postgres` after the import, check `/ready`,
+then keep the old snapshot read-only until the cutover is accepted.
+
 ## Run
 
 ```powershell
@@ -89,6 +133,50 @@ $env:TEST_DATABASE_URL="postgresql+psycopg://tutormatch:change-me@localhost:5432
 ```
 
 Open http://127.0.0.1:8000/docs for the generated API docs.
+
+## Production deployment (Docker Compose)
+
+The repository root contains a PostgreSQL + API stack. It uses the production
+image in `backend/Dockerfile`, persists PostgreSQL and uploads in named volumes,
+and runs the readiness probe against `/ready`.
+
+```powershell
+cd ..
+$env:POSTGRES_PASSWORD = "use-a-long-url-safe-password"
+$env:JWT_SECRET = "use-a-different-long-random-secret"
+docker compose up --build -d
+Invoke-RestMethod http://127.0.0.1:8000/ready
+```
+
+Compose requires both secrets and refuses to start without them. Use a
+URL-safe database password (letters, digits, `-`, `_`, `.`) because the password
+is embedded in `DATABASE_URL`; percent-encode reserved characters if you use a
+different password. The API container applies `alembic upgrade head` before
+starting uvicorn. That is convenient for one replica; for multiple replicas run
+migrations as a separate release job and remove the migration from the container
+command so only one process changes the schema.
+
+Stop the stack without deleting data with `docker compose down`. Add `-v` only
+when you intentionally want to delete the PostgreSQL and upload volumes.
+
+### Backup and restore
+
+Stop the API before a restore, and keep a copy of the dump outside the database
+volume:
+
+```powershell
+docker compose stop api
+docker compose exec db pg_dump -U tutormatch -d tutormatch -Fc -f /tmp/tutormatch.dump
+docker compose cp db:/tmp/tutormatch.dump .\tutormatch.dump
+
+# Restore into the same database after taking the backup above.
+docker compose cp .\tutormatch.dump db:/tmp/tutormatch.dump
+docker compose exec db pg_restore -U tutormatch -d tutormatch --clean --if-exists /tmp/tutormatch.dump
+docker compose start api
+```
+
+If you changed `POSTGRES_USER` or `POSTGRES_DB`, substitute those names in the
+commands. Test a restore against a disposable database before relying on it.
 
 ## Development seed
 
@@ -167,16 +255,29 @@ The matching evaluation is included in the suite. Run just that check with:
 ## Auth endpoints
 
 - `POST /auth/register` — `{email, display_name, role, password, phone?, area_id, subjects, security_questions, privacy_consent, privacy_policy_version}`
-- `POST /auth/login` — `{email, password}`
+- `POST /auth/login` — `{email, password}`; returns tokens, or a `202` OTP challenge when `LOGIN_OTP_REQUIRED=true`
+- `POST /auth/login/otp/verify` — `{challenge_id, code}`; returns tokens after a valid code
 - `POST /auth/refresh` — `{refresh_token}`
 - `POST /auth/logout` — optional `{refresh_token}`, requires a bearer access token
 - `GET /auth/me` — requires a bearer access token
 - `GET /security-questions` — public catalogue of `{id, text}` entries
+- `GET /auth/captcha` — one small CAPTCHA challenge
+- `POST /auth/email-verification/start` — `{email, captcha_id, captcha_answer}`
+- `POST /auth/email-verification/verify` — `{email, code}`
 
 Registration requires a role of `student` or `tutor`, one to four subjects from
 the catalogue, a catalogue area, exactly three distinct security questions, and
 `privacy_consent: true` with `privacy_policy_version: "2026-10-v1"`. The server
 stores the consent flag, consent timestamp, and policy version on the user.
+
+Email OTP verification is a separate one-time-code step. CAPTCHA challenges are
+small in-memory puzzles and are expired automatically. When
+`LOGIN_OTP_REQUIRED=true`, `/auth/login` verifies the password and returns a
+short-lived `challenge_id` instead of tokens; `/auth/login/otp/verify` completes
+the login. The default is `false` so the seeded demo accounts keep working until
+SMTP delivery is configured. Email delivery is not part of this small demo; the
+endpoint stores the code and waits for a later mail transport. SMTP is never
+configured in this repo.
 
 Passwords are hashed with Argon2id through passlib. New passwords need at least
 10 characters, upper and lower case, a digit, a symbol, and must not be a common
@@ -187,7 +288,13 @@ logged. Validation errors are stripped of the submitted `input` and `ctx`, so a
 password or answer cannot be echoed back in a 422 response.
 
 Access tokens last 15 minutes by default; refresh tokens last 7 days and rotate
-on use. Login failures are rate-limited in memory per client IP and email.
+on use. Login failures are rate-limited in memory per client IP and email, and
+an account-scoped lockout blocks the address for `LOGIN_LOCKOUT_SECONDS` after
+`LOGIN_LOCKOUT_ATTEMPTS` failures. The email-verification service also keeps its
+own attempt limit per email address and only verifies a code once. Login success,
+login failure, lockout, OTP send, and OTP failure events are recorded in a
+bounded in-memory security-event list; the list is the hand-off point for future
+alert email delivery and the security dashboard.
 
 ## Profile endpoints
 
@@ -343,4 +450,5 @@ history, so it is also gitignored. Never commit either data directory.
 
 ## Other
 
-- `GET /health`
+- `GET /health` — liveness; the process can serve requests
+- `GET /ready` — readiness; checks the configured storage and returns `503` when PostgreSQL is unavailable

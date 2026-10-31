@@ -13,6 +13,7 @@ from ..errors import (
     DuplicateEmailError,
     EmailAlreadyRegistered,
     InvalidCredentials,
+    InvalidEmailVerification,
     InvalidProfile,
     InvalidToken,
     RateLimited,
@@ -40,7 +41,15 @@ from ..security import (
     PasswordHasher,
     TokenService,
 )
+from ..transactions import TransactionFactory, no_transaction
+from .lockout import AccountLockout
 from .rate_limit import LoginRateLimiter
+from .security_events import SecurityEventService
+from .verification import (
+    EmailOTPService,
+    LoginOTPChallenge,
+    LoginOTPChallengeService,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +70,12 @@ class AuthService:
         tokens: TokenService,
         rate_limiter: LoginRateLimiter,
         catalog: Catalog,
+        transaction: TransactionFactory | None = None,
+        account_lockout: AccountLockout | None = None,
+        security_events: SecurityEventService | None = None,
+        email_otp: EmailOTPService | None = None,
+        login_otp_challenges: LoginOTPChallengeService | None = None,
+        login_otp_required: bool = False,
     ) -> None:
         self._users = users
         self._profiles = profiles
@@ -69,6 +84,14 @@ class AuthService:
         self._tokens = tokens
         self._rate_limiter = rate_limiter
         self._catalog = catalog
+        self._transaction = transaction or no_transaction
+        self._account_lockout = account_lockout or AccountLockout(5, 900)
+        self._security_events = security_events or SecurityEventService()
+        self._email_otp = email_otp or EmailOTPService()
+        self._login_otp_challenges = (
+            login_otp_challenges or LoginOTPChallengeService()
+        )
+        self._login_otp_required = login_otp_required
         # Refresh rotation is a check-then-write operation. Without this lock,
         # two concurrent uses of the same refresh token could both succeed.
         self._refresh_lock = threading.Lock()
@@ -126,25 +149,26 @@ class AuthService:
             created_at=now,
             updated_at=now,
         )
-        try:
-            self._users.add(user)
-        except DuplicateEmailError as exc:
-            # A concurrent registration won the race.
-            raise EmailAlreadyRegistered() from exc
+        with self._transaction():
+            try:
+                self._users.add(user)
+            except DuplicateEmailError as exc:
+                # A concurrent registration won the race.
+                raise EmailAlreadyRegistered() from exc
 
-        # Registration already knows two onboarding answers. The remaining
-        # five questions still decide when onboarding is complete.
-        self._profiles.add(
-            Profile(
-                user_id=user.id,
-                name=display_name,
-                subjects=canonical_subjects,
-                area_id=area.id,
-                updated_at=now,
+            # Registration already knows two onboarding answers. The remaining
+            # five questions still decide when onboarding is complete.
+            self._profiles.add(
+                Profile(
+                    user_id=user.id,
+                    name=display_name,
+                    subjects=canonical_subjects,
+                    area_id=area.id,
+                    updated_at=now,
+                )
             )
-        )
 
-        return self._issue_tokens(user)
+            return self._issue_tokens(user)
 
     def login(
         self,
@@ -152,11 +176,15 @@ class AuthService:
         email: str,
         password: str,
         client_key: str,
-    ) -> AuthResult:
+    ) -> AuthResult | LoginOTPChallenge:
         normalized_email = self._normalize_email(email)
         rate_key = self._rate_key(client_key, normalized_email)
 
         retry_after = self._rate_limiter.check(rate_key)
+        if retry_after is not None:
+            raise RateLimited(retry_after)
+
+        retry_after = self._account_lockout.check(normalized_email)
         if retry_after is not None:
             raise RateLimited(retry_after)
 
@@ -165,15 +193,116 @@ class AuthService:
             # Spend roughly the same work as a real verification so the
             # unknown-email path is not a cheap account-enumeration oracle.
             self._passwords.verify_dummy(password)
-            self._rate_limiter.record_failure(rate_key)
+            self._record_failure(
+                rate_key=rate_key,
+                email=normalized_email,
+                client_key=client_key,
+                user=None,
+            )
             raise InvalidCredentials()
 
         if not self._passwords.verify(password, user.password_hash):
-            self._rate_limiter.record_failure(rate_key)
+            self._record_failure(
+                rate_key=rate_key,
+                email=normalized_email,
+                client_key=client_key,
+                user=user,
+            )
             raise InvalidCredentials()
 
         self._rate_limiter.clear(rate_key)
-        return self._issue_tokens(user)
+        self._account_lockout.clear(normalized_email)
+
+        if self._login_otp_required:
+            challenge = self._login_otp_challenges.start(
+                user_id=user.id,
+                email=str(user.email),
+                email_otp=self._email_otp,
+            )
+            self._security_events.record(
+                "login_otp_sent",
+                user_id=user.id,
+                email=str(user.email),
+                client_key=client_key,
+            )
+            return challenge
+
+        result = self._issue_tokens(user)
+        self._security_events.record(
+            "login_succeeded",
+            user_id=user.id,
+            email=str(user.email),
+            client_key=client_key,
+            detail="password",
+        )
+        return result
+
+    def verify_login_otp(
+        self,
+        *,
+        challenge_id: str,
+        code: str,
+        client_key: str,
+    ) -> AuthResult:
+        try:
+            challenge = self._login_otp_challenges.verify(
+                challenge_id,
+                code,
+                self._email_otp,
+            )
+        except (InvalidEmailVerification, RateLimited):
+            self._security_events.record(
+                "login_otp_failed",
+                client_key=client_key,
+            )
+            raise
+
+        user = self._users.get_by_id(challenge.user_id)
+        if user is None:
+            raise InvalidToken()
+
+        self._security_events.record(
+            "login_otp_verified",
+            user_id=user.id,
+            email=str(user.email),
+            client_key=client_key,
+        )
+        result = self._issue_tokens(user)
+        self._security_events.record(
+            "login_succeeded",
+            user_id=user.id,
+            email=str(user.email),
+            client_key=client_key,
+            detail="otp",
+        )
+        return result
+
+    def _record_failure(
+        self,
+        *,
+        rate_key: str,
+        email: str,
+        client_key: str,
+        user: User | None,
+    ) -> None:
+        self._rate_limiter.record_failure(rate_key)
+        newly_locked = self._account_lockout.record_failure(email)
+        self._security_events.record(
+            "login_failed",
+            user_id=user.id if user is not None else None,
+            email=email,
+            client_key=client_key,
+        )
+        if newly_locked:
+            self._security_events.record(
+                "account_locked",
+                user_id=user.id if user is not None else None,
+                email=email,
+                client_key=client_key,
+                detail=(
+                    f"{self._account_lockout.max_attempts} failed attempts"
+                ),
+            )
 
     def refresh(self, refresh_token: str) -> AuthResult:
         payload = self._tokens.decode(refresh_token, REFRESH_TOKEN_TYPE)
@@ -183,49 +312,51 @@ class AuthService:
             raise InvalidToken()
 
         with self._refresh_lock:
-            stored = self._refresh_tokens.get_by_jti(jti)
-            if stored is None or stored.revoked_at is not None:
-                raise InvalidToken()
-            if stored.user_id != user_id:
-                raise InvalidToken()
-            if stored.expires_at <= datetime.now(timezone.utc):
-                raise InvalidToken()
+            with self._transaction():
+                stored = self._refresh_tokens.get_by_jti(jti)
+                if stored is None or stored.revoked_at is not None:
+                    raise InvalidToken()
+                if stored.user_id != user_id:
+                    raise InvalidToken()
+                if stored.expires_at <= datetime.now(timezone.utc):
+                    raise InvalidToken()
 
-            user = self._users.get_by_id(user_id)
-            if user is None:
-                raise InvalidToken()
+                user = self._users.get_by_id(user_id)
+                if user is None:
+                    raise InvalidToken()
 
-            access = self._tokens.create_access_token(user)
-            new_refresh = self._tokens.create_refresh_token(user)
-            self._refresh_tokens.revoke(
-                jti,
-                replaced_by_jti=new_refresh.jti,
-            )
-            self._store_refresh_token(user, new_refresh)
+                access = self._tokens.create_access_token(user)
+                new_refresh = self._tokens.create_refresh_token(user)
+                self._refresh_tokens.revoke(
+                    jti,
+                    replaced_by_jti=new_refresh.jti,
+                )
+                self._store_refresh_token(user, new_refresh)
         return AuthResult(user=user, access=access, refresh=new_refresh)
 
     def logout(self, user: User, refresh_token: str | None) -> None:
-        if not refresh_token:
-            with self._refresh_lock:
-                self._refresh_tokens.revoke_all_for_user(user.id)
-            return
+        with self._transaction():
+            if not refresh_token:
+                with self._refresh_lock:
+                    self._refresh_tokens.revoke_all_for_user(user.id)
+                return
 
-        try:
-            payload = self._tokens.decode(
-                refresh_token,
-                REFRESH_TOKEN_TYPE,
-            )
-        except InvalidToken:
-            # Logout is intentionally idempotent and does not reveal whether
-            # a supplied token was valid.
-            return
+            try:
+                payload = self._tokens.decode(
+                    refresh_token,
+                    REFRESH_TOKEN_TYPE,
+                )
+            except InvalidToken:
+                # Logout is intentionally idempotent and does not reveal
+                # whether a supplied token was valid.
+                return
 
-        if payload.get("sub") != user.id:
-            return
-        jti = payload.get("jti")
-        if isinstance(jti, str) and jti:
-            with self._refresh_lock:
-                self._refresh_tokens.revoke(jti)
+            if payload.get("sub") != user.id:
+                return
+            jti = payload.get("jti")
+            if isinstance(jti, str) and jti:
+                with self._refresh_lock:
+                    self._refresh_tokens.revoke(jti)
 
     def get_user_from_access_token(self, token: str) -> User:
         payload = self._tokens.decode(token, ACCESS_TOKEN_TYPE)
@@ -330,10 +461,11 @@ class AuthService:
         return answer in normalized
 
     def _issue_tokens(self, user: User) -> AuthResult:
-        access = self._tokens.create_access_token(user)
-        refresh = self._tokens.create_refresh_token(user)
-        self._store_refresh_token(user, refresh)
-        return AuthResult(user=user, access=access, refresh=refresh)
+        with self._transaction():
+            access = self._tokens.create_access_token(user)
+            refresh = self._tokens.create_refresh_token(user)
+            self._store_refresh_token(user, refresh)
+            return AuthResult(user=user, access=access, refresh=refresh)
 
     def _store_refresh_token(
         self,

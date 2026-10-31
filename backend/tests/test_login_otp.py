@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.services.lockout import AccountLockout
+from app.services.verification import LOGIN_OTP_SCOPE
 from tests.registration import COMPLIANT_PASSWORD, registration_payload
 
 
@@ -57,7 +58,7 @@ def test_login_returns_an_otp_challenge_instead_of_tokens(
     assert "code" not in body
     assert len(email_outbox.messages) == 1
     code = otp_app.state.container.email_otp._codes[
-        "student@example.com"
+        ("student@example.com", LOGIN_OTP_SCOPE)
     ].code
     assert email_outbox.messages[0].to == "student@example.com"
     assert code in email_outbox.messages[0].body
@@ -89,7 +90,7 @@ def test_login_otp_verifies_once_and_issues_tokens(
     assert _register(otp_client).status_code == 201
     challenge = _login(otp_client).json()
     code = otp_app.state.container.email_otp._codes[
-        "student@example.com"
+        ("student@example.com", LOGIN_OTP_SCOPE)
     ].code
 
     response = otp_client.post(
@@ -130,7 +131,7 @@ def test_login_otp_rejects_wrong_codes_without_tokens(
     assert _register(otp_client).status_code == 201
     challenge = _login(otp_client).json()
     actual = otp_app.state.container.email_otp._codes[
-        "student@example.com"
+        ("student@example.com", LOGIN_OTP_SCOPE)
     ].code
     wrong = "000000" if actual != "000000" else "111111"
 
@@ -156,7 +157,7 @@ def test_repeated_login_otp_failures_send_one_alert(
     assert _register(otp_client).status_code == 201
     challenge = _login(otp_client).json()
     actual = otp_app.state.container.email_otp._codes[
-        "student@example.com"
+        ("student@example.com", LOGIN_OTP_SCOPE)
     ].code
     wrong = "000000" if actual != "000000" else "111111"
 
@@ -189,7 +190,7 @@ def test_security_events_do_not_store_passwords_or_otp_codes(
     assert _register(otp_client).status_code == 201
     challenge = _login(otp_client).json()
     code = otp_app.state.container.email_otp._codes[
-        "student@example.com"
+        ("student@example.com", LOGIN_OTP_SCOPE)
     ].code
     otp_client.post(
         "/auth/login",

@@ -11,7 +11,12 @@ from app.errors import (
     InvalidEmailVerification,
 )
 from app.services.email import OutboundEmail
-from app.services.verification import EmailOTPService
+from app.services.verification import (
+    EMAIL_VERIFICATION_SCOPE,
+    LOGIN_OTP_SCOPE,
+    PASSWORD_RESET_OTP_SCOPE,
+    EmailOTPService,
+)
 
 
 def _start_body(email: str, challenge_id: str, answer: str) -> dict:
@@ -59,7 +64,7 @@ def test_captcha_challenge_can_be_used_once(
     assert len(recording_email.messages) == 1
     message = recording_email.messages[0]
     code = app.state.container.email_otp._codes[
-        "student@example.com"
+        ("student@example.com", EMAIL_VERIFICATION_SCOPE)
     ].code
     assert message.to == "student@example.com"
     assert code in message.body
@@ -147,11 +152,12 @@ def test_email_otp_can_be_verified_once(app) -> None:
 
     email_otp = EmailOTPService()
     email_otp.start(email="maya@example.com")
-    code = email_otp._codes["maya@example.com"].code
+    key = ("maya@example.com", EMAIL_VERIFICATION_SCOPE)
+    code = email_otp._codes[key].code
 
     email_otp.verify("maya@example.com", code)
 
-    assert "maya@example.com" not in email_otp._codes
+    assert key not in email_otp._codes
     with pytest.raises(
         InvalidEmailVerification,
     ):
@@ -174,3 +180,55 @@ def test_email_verification_expiry_and_new_code(app) -> None:
     assert expires
     new_expires = email_otp.start(email="Maya@example.com")
     assert new_expires != expires
+
+
+def test_email_otp_scopes_cannot_be_swapped(app) -> None:
+    email_otp = EmailOTPService()
+    email_otp.start(email="maya@example.com", scope=EMAIL_VERIFICATION_SCOPE)
+    email_otp.start(email="maya@example.com", scope=LOGIN_OTP_SCOPE)
+    email_otp.start(email="maya@example.com", scope=PASSWORD_RESET_OTP_SCOPE)
+
+    email_code = email_otp._codes[
+        ("maya@example.com", EMAIL_VERIFICATION_SCOPE)
+    ].code
+    login_code = email_otp._codes[
+        ("maya@example.com", LOGIN_OTP_SCOPE)
+    ].code
+    reset_code = email_otp._codes[
+        ("maya@example.com", PASSWORD_RESET_OTP_SCOPE)
+    ].code
+
+    with pytest.raises(InvalidEmailVerification):
+        email_otp.verify(
+            "maya@example.com",
+            reset_code,
+            scope=EMAIL_VERIFICATION_SCOPE,
+        )
+    with pytest.raises(InvalidEmailVerification):
+        email_otp.verify(
+            "maya@example.com",
+            email_code,
+            scope=LOGIN_OTP_SCOPE,
+        )
+    with pytest.raises(InvalidEmailVerification):
+        email_otp.verify(
+            "maya@example.com",
+            login_code,
+            scope=PASSWORD_RESET_OTP_SCOPE,
+        )
+
+    email_otp.verify(
+        "maya@example.com",
+        email_code,
+        scope=EMAIL_VERIFICATION_SCOPE,
+    )
+    email_otp.verify(
+        "maya@example.com",
+        login_code,
+        scope=LOGIN_OTP_SCOPE,
+    )
+    email_otp.verify(
+        "maya@example.com",
+        reset_code,
+        scope=PASSWORD_RESET_OTP_SCOPE,
+    )

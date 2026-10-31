@@ -11,6 +11,7 @@ from ..models.verification import (
     EmailVerificationStart,
     EmailVerificationVerify,
 )
+from ..services.verification import EMAIL_VERIFICATION_SCOPE
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -38,6 +39,7 @@ def start_email_verification(
         email=str(payload.email),
         email_service=container.email,
         purpose="email verification",
+        scope=EMAIL_VERIFICATION_SCOPE,
     )
     return {"status": "sent", "expires_at": expires_at.isoformat()}
 
@@ -54,6 +56,7 @@ def verify_email_verification(
     container.email_otp.verify(
         email=str(payload.email),
         code=payload.code,
+        scope=EMAIL_VERIFICATION_SCOPE,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

@@ -83,6 +83,23 @@ def test_email_service_puts_the_code_only_in_the_body() -> None:
     assert "123456" not in message.subject
 
 
+def test_password_reset_otp_uses_a_password_reset_subject() -> None:
+    transport = _RecordingTransport()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    EmailService(transport).send_otp(
+        to="maya@example.com",
+        code="123456",
+        expires_at=expires_at,
+        purpose="password reset",
+    )
+
+    message = transport.messages[0]
+    assert "password reset" in message.subject.lower()
+    assert "123456" in message.body
+    assert "123456" not in message.subject
+
+
 def test_unavailable_transport_returns_a_generic_error() -> None:
     with pytest.raises(EmailDeliveryUnavailable):
         UnavailableEmailTransport().send(

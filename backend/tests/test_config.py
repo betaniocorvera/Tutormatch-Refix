@@ -128,6 +128,28 @@ def test_from_env_reads_login_security_settings(monkeypatch) -> None:
     assert settings.login_lockout_seconds == 120
 
 
+def test_from_env_reads_password_reset_rate_limits(monkeypatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", "s" * 64)
+    monkeypatch.setenv("PASSWORD_RESET_RATE_LIMIT_ATTEMPTS", "4")
+    monkeypatch.setenv("PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS", "300")
+
+    settings = Settings.from_env()
+
+    assert settings.password_reset_rate_limit_attempts == 4
+    assert settings.password_reset_rate_limit_window_seconds == 300
+
+
+def test_password_reset_rate_limits_must_be_positive() -> None:
+    with pytest.raises(
+        ValueError,
+        match="PASSWORD_RESET_RATE_LIMIT_ATTEMPTS",
+    ):
+        Settings(
+            jwt_secret="s" * 64,
+            password_reset_rate_limit_attempts=0,
+        )
+
+
 def test_login_lockout_attempts_must_be_positive() -> None:
     with pytest.raises(ValueError, match="LOGIN_LOCKOUT_ATTEMPTS"):
         Settings(jwt_secret="s" * 64, login_lockout_attempts=0)

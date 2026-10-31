@@ -99,6 +99,8 @@ class Settings:
     snapshot_debounce_seconds: float = 0.5
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 900
+    password_reset_rate_limit_attempts: int = 3
+    password_reset_rate_limit_window_seconds: int = 900
     login_otp_required: bool = False
     login_lockout_attempts: int = 5
     login_lockout_seconds: int = 900
@@ -137,6 +139,14 @@ class Settings:
             raise ValueError("LOGIN_RATE_LIMIT_ATTEMPTS must be positive")
         if self.login_rate_limit_window_seconds <= 0:
             raise ValueError("LOGIN_RATE_LIMIT_WINDOW_SECONDS must be positive")
+        if self.password_reset_rate_limit_attempts <= 0:
+            raise ValueError(
+                "PASSWORD_RESET_RATE_LIMIT_ATTEMPTS must be positive"
+            )
+        if self.password_reset_rate_limit_window_seconds <= 0:
+            raise ValueError(
+                "PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS must be positive"
+            )
         if self.login_lockout_attempts <= 0:
             raise ValueError("LOGIN_LOCKOUT_ATTEMPTS must be positive")
         if self.login_lockout_seconds <= 0:
@@ -292,6 +302,12 @@ class Settings:
             login_rate_limit_attempts=_env_int("LOGIN_RATE_LIMIT_ATTEMPTS", 5),
             login_rate_limit_window_seconds=_env_int(
                 "LOGIN_RATE_LIMIT_WINDOW_SECONDS", 900
+            ),
+            password_reset_rate_limit_attempts=_env_int(
+                "PASSWORD_RESET_RATE_LIMIT_ATTEMPTS", 3
+            ),
+            password_reset_rate_limit_window_seconds=_env_int(
+                "PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS", 900
             ),
             login_otp_required=_env_bool("LOGIN_OTP_REQUIRED", False),
             login_lockout_attempts=_env_int("LOGIN_LOCKOUT_ATTEMPTS", 5),

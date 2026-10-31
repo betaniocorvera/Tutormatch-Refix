@@ -162,7 +162,11 @@ paths.
 - Duplicate-email responses use one neutral message instead of confirming which
   address exists. Validation errors omit the submitted password and answers.
 - Access tokens last 15 minutes. Refresh tokens last 7 days, rotate on use, and
-  are revoked on logout.
+  are revoked on logout. A completed password reset revokes every refresh token
+  for the account.
+- Forgot-password requests require a CAPTCHA, are rate-limited, and return the
+  same response whether or not the email is registered. Reset codes are
+  purpose-scoped, expire, allow three attempts, and are consumed on use.
 - Email OTP delivery uses SMTP. The code appears only in the email body; it is
   never returned by an endpoint or written to logs. Missing or failed delivery
   returns a generic error and does not keep a pending code. When SMTP is

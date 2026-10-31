@@ -12,6 +12,8 @@ from ..catalog import Catalog
 from ..errors import (
     DuplicateEmailError,
     EmailAlreadyRegistered,
+    EmailDeliveryFailed,
+    EmailDeliveryUnavailable,
     InvalidCredentials,
     InvalidEmailVerification,
     InvalidProfile,
@@ -27,7 +29,7 @@ from ..models.user import (
     User,
     UserMe,
 )
-from ..passwords import normalize_security_answer
+from ..passwords import normalize_security_answer, validate_password_policy
 from ..privacy import PRIVACY_POLICY_VERSION
 from ..repositories.interfaces import (
     ProfileRepository,
@@ -47,9 +49,11 @@ from .lockout import AccountLockout
 from .rate_limit import LoginRateLimiter
 from .security_events import SecurityEventService
 from .verification import (
+    CAPTCHAService,
     EmailOTPService,
     LoginOTPChallenge,
     LoginOTPChallengeService,
+    PASSWORD_RESET_OTP_SCOPE,
 )
 
 
@@ -77,6 +81,8 @@ class AuthService:
         email_service: EmailService | None = None,
         email_otp: EmailOTPService | None = None,
         login_otp_challenges: LoginOTPChallengeService | None = None,
+        captcha: CAPTCHAService | None = None,
+        password_reset_rate_limiter: LoginRateLimiter | None = None,
         login_otp_required: bool = False,
     ) -> None:
         self._users = users
@@ -95,6 +101,10 @@ class AuthService:
         self._email_otp = email_otp or EmailOTPService()
         self._login_otp_challenges = (
             login_otp_challenges or LoginOTPChallengeService()
+        )
+        self._captcha = captcha or CAPTCHAService()
+        self._password_reset_rate_limiter = (
+            password_reset_rate_limiter or LoginRateLimiter(3, 900)
         )
         self._login_otp_required = login_otp_required
         # Refresh rotation is a check-then-write operation. Without this lock,
@@ -293,6 +303,110 @@ class AuthService:
             detail="otp",
         )
         return result
+
+    def request_password_reset(
+        self,
+        *,
+        email: str,
+        captcha_id: str,
+        captcha_answer: str,
+        client_key: str,
+    ) -> None:
+        """Send a reset code without revealing whether the account exists."""
+
+        normalized_email = self._normalize_email(email)
+        rate_key = self._rate_key(client_key, normalized_email)
+        retry_after = self._password_reset_rate_limiter.check(rate_key)
+        if retry_after is not None:
+            raise RateLimited(retry_after)
+        self._password_reset_rate_limiter.record_failure(rate_key)
+
+        self._captcha.verify(captcha_id, captcha_answer)
+
+        if not self._email.is_configured:
+            raise EmailDeliveryUnavailable()
+
+        user = self._users.get_by_email(normalized_email)
+        if user is None:
+            return
+
+        try:
+            self._email_otp.start(
+                email=normalized_email,
+                email_service=self._email,
+                purpose="password reset",
+                scope=PASSWORD_RESET_OTP_SCOPE,
+            )
+        except (EmailDeliveryFailed, EmailDeliveryUnavailable):
+            # The response stays generic even when delivery fails for an
+            # existing account; the pending code has already been cleared.
+            return
+
+        self._security_events.record(
+            "password_reset_requested",
+            user_id=user.id,
+            email=str(user.email),
+            client_key=client_key,
+        )
+
+    def confirm_password_reset(
+        self,
+        *,
+        email: str,
+        code: str,
+        new_password: str,
+        client_key: str,
+    ) -> None:
+        """Consume a reset code, change the password, and revoke sessions."""
+
+        normalized_email = self._normalize_email(email)
+        self._email_otp.verify(
+            normalized_email,
+            code,
+            scope=PASSWORD_RESET_OTP_SCOPE,
+        )
+
+        user = self._users.get_by_email(normalized_email)
+        if user is None:
+            raise InvalidEmailVerification()
+
+        try:
+            validate_password_policy(
+                new_password,
+                email=str(user.email),
+                display_name=user.display_name,
+            )
+        except ValueError as exc:
+            raise InvalidProfile(str(exc)) from exc
+
+        password_hash = self._passwords.hash(new_password)
+        now = datetime.now(timezone.utc)
+        with self._refresh_lock:
+            with self._transaction():
+                current = self._users.get_by_email(normalized_email)
+                if current is None:
+                    raise InvalidEmailVerification()
+                self._users.update(
+                    current.model_copy(
+                        update={
+                            "password_hash": password_hash,
+                            "updated_at": now,
+                        }
+                    )
+                )
+                self._refresh_tokens.revoke_all_for_user(current.id)
+
+        self._account_lockout.clear(normalized_email)
+        self._rate_limiter.clear(
+            self._rate_key(client_key, normalized_email)
+        )
+        self._security_events.record(
+            "password_reset_completed",
+            user_id=current.id,
+            email=str(current.email),
+            client_key=client_key,
+            detail="email OTP",
+        )
 
     def _record_failure(
         self,

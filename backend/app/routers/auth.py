@@ -11,6 +11,11 @@ from ..models.auth import (
     LoginOTPChallengeResponse,
     LoginOTPVerifyRequest,
 )
+from ..models.verification import (
+    PasswordResetConfirm,
+    PasswordResetRequest,
+    PasswordResetRequestResponse,
+)
 from ..models.user import (
     LoginRequest,
     LogoutRequest,
@@ -101,6 +106,45 @@ def verify_login_otp(
         client_key=client_key,
     )
     return _auth_response(result, auth)
+
+
+@router.post(
+    "/password-reset/request",
+    response_model=PasswordResetRequestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def request_password_reset(
+    payload: PasswordResetRequest,
+    request: Request,
+    auth: AuthServiceDep,
+) -> PasswordResetRequestResponse:
+    client_key = request.client.host if request.client else "unknown"
+    auth.request_password_reset(
+        email=str(payload.email),
+        captcha_id=payload.captcha_id,
+        captcha_answer=payload.captcha_answer,
+        client_key=client_key,
+    )
+    return PasswordResetRequestResponse()
+
+
+@router.post(
+    "/password-reset/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def confirm_password_reset(
+    payload: PasswordResetConfirm,
+    request: Request,
+    auth: AuthServiceDep,
+) -> Response:
+    client_key = request.client.host if request.client else "unknown"
+    auth.confirm_password_reset(
+        email=str(payload.email),
+        code=payload.code,
+        new_password=payload.new_password,
+        client_key=client_key,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/refresh", response_model=AuthResponse)

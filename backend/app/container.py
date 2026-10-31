@@ -133,6 +133,10 @@ class AppContainer:
             settings.login_rate_limit_attempts,
             settings.login_rate_limit_window_seconds,
         )
+        self.password_reset_rate_limiter = LoginRateLimiter(
+            settings.password_reset_rate_limit_attempts,
+            settings.password_reset_rate_limit_window_seconds,
+        )
         self.account_lockout = AccountLockout(
             settings.login_lockout_attempts,
             settings.login_lockout_seconds,
@@ -164,6 +168,8 @@ class AppContainer:
             email_service=self.email,
             email_otp=self.email_otp,
             login_otp_challenges=self.login_otp_challenges,
+            captcha=self.captcha,
+            password_reset_rate_limiter=self.password_reset_rate_limiter,
             login_otp_required=settings.login_otp_required,
         )
         self.profile = ProfileService(

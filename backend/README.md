@@ -136,9 +136,9 @@ Open http://127.0.0.1:8000/docs for the generated API docs.
 
 ## Email delivery (SMTP)
 
-Email verification, the optional login OTP, and security alerts use a standard
-SMTP server. Add the settings to `backend/.env`; use an app password or a
-dedicated SMTP credential, never a normal mailbox password:
+Email verification, the optional login OTP, password reset, and security alerts
+use a standard SMTP server. Add the settings to `backend/.env`; use an app
+password or a dedicated SMTP credential, never a normal mailbox password:
 
 ```dotenv
 SMTP_HOST=smtp.example.com
@@ -315,6 +315,8 @@ The matching evaluation is included in the suite. Run just that check with:
 - `POST /auth/register` — `{email, display_name, role, password, phone?, area_id, subjects, security_questions, privacy_consent, privacy_policy_version}`
 - `POST /auth/login` — `{email, password}`; returns tokens, or a `202` OTP challenge when `LOGIN_OTP_REQUIRED=true`
 - `POST /auth/login/otp/verify` — `{challenge_id, code}`; returns tokens after a valid code
+- `POST /auth/password-reset/request` — `{email, captcha_id, captcha_answer}`; always returns the same `202` response
+- `POST /auth/password-reset/confirm` — `{email, code, new_password}`; changes the password and revokes all refresh tokens
 - `POST /auth/refresh` — `{refresh_token}`
 - `POST /auth/logout` — optional `{refresh_token}`, requires a bearer access token
 - `GET /auth/me` — requires a bearer access token
@@ -333,9 +335,19 @@ small in-memory puzzles and are expired automatically. When
 `LOGIN_OTP_REQUIRED=true`, `/auth/login` verifies the password and returns a
 short-lived `challenge_id` instead of tokens; `/auth/login/otp/verify` completes
 the login. The default is `false` so the seeded demo accounts keep working
-without email. Both OTP flows send the code through the configured SMTP
-transport; see [Email delivery](#email-delivery-smtp). The code is never returned
-by an endpoint or written to a log.
+without email. Email-verification, login, and password-reset codes are
+purpose-scoped and stored independently, so a reset code cannot be replayed
+against another flow. All three OTP flows send the code through the configured
+SMTP transport; see [Email delivery](#email-delivery-smtp). The code is never
+returned by an endpoint or written to a log.
+
+Password reset starts with a CAPTCHA and a rate-limited request. The response is
+identical whether or not the email is registered; an email is sent only when the
+account exists. The confirmation step verifies the reset-scoped code, applies the
+normal password policy, updates the password hash, and revokes every refresh
+token for the account. Reset codes expire after ten minutes, allow three
+attempts, and are consumed on use. If SMTP is not configured, the request returns
+a generic `503` for every address.
 
 Passwords are hashed with Argon2id through passlib. New passwords need at least
 10 characters, upper and lower case, a digit, a symbol, and must not be a common
@@ -348,12 +360,14 @@ password or answer cannot be echoed back in a 422 response.
 Access tokens last 15 minutes by default; refresh tokens last 7 days and rotate
 on use. Login failures are rate-limited in memory per client IP and email, and
 an account-scoped lockout blocks the address for `LOGIN_LOCKOUT_SECONDS` after
-`LOGIN_LOCKOUT_ATTEMPTS` failures. The email-verification service also keeps its
-own attempt limit per email address and only verifies a code once. Login success,
-login failure, lockout, OTP send, and OTP failure events are recorded in a
-bounded in-memory security-event list. Selected events also trigger a
-best-effort email to the account owner; the list remains the hand-off point for
-the security dashboard.
+`LOGIN_LOCKOUT_ATTEMPTS` failures. Password-reset requests use a separate limiter
+controlled by `PASSWORD_RESET_RATE_LIMIT_ATTEMPTS` and
+`PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS`. The OTP services also keep their own
+attempt limits per email and scope, and only verify a code once. Login success,
+login failure, lockout, OTP send, OTP failure, password-reset request, and
+password-reset completion events are recorded in a bounded in-memory
+security-event list. Selected events also trigger a best-effort email to the
+account owner; the list remains the hand-off point for the security dashboard.
 
 ## Profile endpoints
 

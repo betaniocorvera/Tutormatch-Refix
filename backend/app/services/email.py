@@ -179,7 +179,12 @@ class EmailService:
         the subject, logs, or an API response.
         """
 
-        label = "sign-in" if purpose == "sign-in" else "verification"
+        labels = {
+            "sign-in": "sign-in",
+            "password reset": "password reset",
+            "email verification": "verification",
+        }
+        label = labels.get(purpose.strip().lower(), "verification")
         now = (
             datetime.now(timezone.utc).replace(tzinfo=None)
             if expires_at.tzinfo is None

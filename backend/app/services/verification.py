@@ -29,6 +29,17 @@ _OTP_MAX_ATTEMPTS = 3
 _OTP_LENGTH = 6
 _OTP_ALPHABET = "0123456789"
 
+EMAIL_VERIFICATION_SCOPE = "email_verification"
+LOGIN_OTP_SCOPE = "login"
+PASSWORD_RESET_OTP_SCOPE = "password_reset"
+_OTP_SCOPES = frozenset(
+    {
+        EMAIL_VERIFICATION_SCOPE,
+        LOGIN_OTP_SCOPE,
+        PASSWORD_RESET_OTP_SCOPE,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CAPTCHAChallengeResponse:
@@ -67,6 +78,13 @@ class LoginOTPChallenge:
     email: str
     expires_at: datetime
     attempts: int = 0
+
+
+def _normalize_scope(scope: str) -> str:
+    normalized = scope.strip().lower()
+    if normalized not in _OTP_SCOPES:
+        raise ValueError("Unknown OTP scope")
+    return normalized
 
 
 def _answer_to(left: int, right: int, operator: str) -> tuple[str, str]:
@@ -159,7 +177,7 @@ class EmailOTPService:
     """
 
     def __init__(self) -> None:
-        self._codes: dict[str, _EmailOTPCode] = {}
+        self._codes: dict[tuple[str, str], _EmailOTPCode] = {}
         self._lock = threading.Lock()
 
     def start(
@@ -169,20 +187,24 @@ class EmailOTPService:
         email_service: EmailService | None = None,
         purpose: str = "email verification",
         subject: str | None = None,
+        scope: str = EMAIL_VERIFICATION_SCOPE,
     ) -> datetime:
-        """Create an OTP and optionally deliver it.
+        """Create a purpose-scoped OTP and optionally deliver it.
 
         The code stays inside this service. If delivery fails, the pending code
         is removed so a later verification attempt cannot succeed with a code
-        that was never sent.
+        that was never sent. Codes for different scopes are independent, so a
+        reset code cannot be replayed against login or email verification.
         """
 
         now = datetime.now(timezone.utc)
         normalized = self._normalize_email(email)
+        normalized_scope = _normalize_scope(scope)
+        key = (normalized, normalized_scope)
         code = "".join(secrets.choice(_OTP_ALPHABET) for _ in range(_OTP_LENGTH))
         expires_at = now + _OTP_TTL
         with self._lock:
-            self._codes[normalized] = _EmailOTPCode(
+            self._codes[key] = _EmailOTPCode(
                 email=normalized,
                 code=code,
                 expires_at=expires_at,
@@ -200,25 +222,32 @@ class EmailOTPService:
                 )
             except Exception:
                 with self._lock:
-                    current = self._codes.get(normalized)
+                    current = self._codes.get(key)
                     if current is not None and current.code == code:
-                        self._codes.pop(normalized, None)
+                        self._codes.pop(key, None)
                 raise
         return expires_at
 
-    def verify(self, email: str, code: str) -> None:
-        """Consume an OTP; raise when it is wrong, expired, or over-attempted."""
+    def verify(
+        self,
+        email: str,
+        code: str,
+        *,
+        scope: str = EMAIL_VERIFICATION_SCOPE,
+    ) -> None:
+        """Consume a scoped OTP; raise when it is wrong, expired, or over-attempted."""
         now = datetime.now(timezone.utc)
         normalized = self._normalize_email(email)
+        key = (normalized, _normalize_scope(scope))
         with self._lock:
-            pending = self._codes.get(normalized)
+            pending = self._codes.get(key)
             if pending is None:
                 raise InvalidEmailVerification()
             if pending.expires_at <= now:
-                self._codes.pop(normalized, None)
+                self._codes.pop(key, None)
                 raise InvalidEmailVerification()
             if pending.attempts >= _OTP_MAX_ATTEMPTS:
-                self._codes.pop(normalized, None)
+                self._codes.pop(key, None)
                 raise RateLimited(
                     _OTP_TTL.seconds,
                     detail="Too many verification attempts.",
@@ -227,21 +256,27 @@ class EmailOTPService:
             if not hmac.compare_digest(code, pending.code):
                 attempts = pending.attempts + 1
                 if attempts >= _OTP_MAX_ATTEMPTS:
-                    self._codes.pop(normalized, None)
+                    self._codes.pop(key, None)
                     raise InvalidEmailVerification()
-                self._codes[normalized] = replace(
+                self._codes[key] = replace(
                     pending,
                     attempts=attempts,
                 )
                 raise InvalidEmailVerification()
 
-            self._codes.pop(normalized, None)
+            self._codes.pop(key, None)
 
-    def clear(self, email: str) -> None:
-        """Forget a pending OTP without validating its code."""
+    def clear(
+        self,
+        email: str,
+        *,
+        scope: str = EMAIL_VERIFICATION_SCOPE,
+    ) -> None:
+        """Forget a pending scoped OTP without validating its code."""
         normalized = self._normalize_email(email)
+        key = (normalized, _normalize_scope(scope))
         with self._lock:
-            self._codes.pop(normalized, None)
+            self._codes.pop(key, None)
 
     def _normalize_email(self, email: str) -> str:
         try:
@@ -254,9 +289,9 @@ class EmailOTPService:
         return email.strip().casefold()
 
     def _gc(self, now: datetime) -> None:
-        for email in list(self._codes):
-            if self._codes[email].expires_at <= now:
-                self._codes.pop(email, None)
+        for key in list(self._codes):
+            if self._codes[key].expires_at <= now:
+                self._codes.pop(key, None)
 
 
 class LoginOTPChallengeService:
@@ -284,6 +319,7 @@ class LoginOTPChallengeService:
             email=normalized,
             email_service=email_service,
             purpose="sign-in",
+            scope=LOGIN_OTP_SCOPE,
         )
         now = datetime.now(timezone.utc)
         challenge = LoginOTPChallenge(
@@ -329,7 +365,11 @@ class LoginOTPChallengeService:
                 )
 
         try:
-            email_otp.verify(challenge.email, code)
+            email_otp.verify(
+                challenge.email,
+                code,
+                scope=LOGIN_OTP_SCOPE,
+            )
         except InvalidEmailVerification:
             with self._lock:
                 current = self._by_id.get(challenge_id)

@@ -133,6 +133,66 @@ def test_login_lockout_attempts_must_be_positive() -> None:
         Settings(jwt_secret="s" * 64, login_lockout_attempts=0)
 
 
+def test_from_env_reads_smtp_settings(monkeypatch) -> None:
+    monkeypatch.setenv("JWT_SECRET", "s" * 64)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_PORT", "465")
+    monkeypatch.setenv("SMTP_USERNAME", "mailer")
+    monkeypatch.setenv("SMTP_PASSWORD", "smtp-secret")
+    monkeypatch.setenv("SMTP_FROM", "no-reply@example.com")
+    monkeypatch.setenv("SMTP_STARTTLS", "false")
+    monkeypatch.setenv("SMTP_SSL", "true")
+    monkeypatch.setenv("SMTP_TIMEOUT_SECONDS", "5.5")
+
+    settings = Settings.from_env()
+
+    assert settings.smtp_host == "smtp.example.com"
+    assert settings.smtp_port == 465
+    assert settings.smtp_username == "mailer"
+    assert settings.smtp_password == "smtp-secret"
+    assert settings.smtp_from == "no-reply@example.com"
+    assert settings.smtp_starttls is False
+    assert settings.smtp_ssl is True
+    assert settings.smtp_timeout_seconds == 5.5
+    assert "smtp-secret" not in repr(settings)
+
+
+def test_smtp_from_is_required_when_host_is_set() -> None:
+    with pytest.raises(ValueError, match="SMTP_FROM"):
+        Settings(
+            jwt_secret="s" * 64,
+            smtp_host="smtp.example.com",
+        )
+
+
+def test_smtp_ssl_and_starttls_cannot_both_be_enabled() -> None:
+    with pytest.raises(ValueError, match="SMTP_SSL"):
+        Settings(
+            jwt_secret="s" * 64,
+            smtp_host="smtp.example.com",
+            smtp_from="no-reply@example.com",
+            smtp_ssl=True,
+            smtp_starttls=True,
+        )
+
+
+def test_production_login_otp_requires_smtp() -> None:
+    with pytest.raises(ValueError, match="SMTP_HOST"):
+        Settings(
+            app_env="production",
+            jwt_secret="s" * 64,
+            login_otp_required=True,
+        )
+
+
+def test_smtp_port_must_be_valid() -> None:
+    with pytest.raises(ValueError, match="SMTP_PORT"):
+        Settings(
+            jwt_secret="s" * 64,
+            smtp_port=0,
+        )
+
+
 def test_from_env_reads_storage_backend(monkeypatch) -> None:
     monkeypatch.setenv("JWT_SECRET", "s" * 64)
     monkeypatch.setenv("STORAGE_BACKEND", "postgres")

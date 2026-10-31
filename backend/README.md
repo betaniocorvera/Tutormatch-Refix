@@ -134,6 +134,50 @@ then keep the old snapshot read-only until the cutover is accepted.
 
 Open http://127.0.0.1:8000/docs for the generated API docs.
 
+## Email delivery (SMTP)
+
+Email verification and the optional login OTP use a standard SMTP server. Add
+the settings to `backend/.env`; use an app password or a dedicated SMTP
+credential, never a normal mailbox password:
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=tutormatch@example.com
+SMTP_PASSWORD=replace-with-an-app-password
+SMTP_FROM=TutorMatch <no-reply@example.com>
+SMTP_STARTTLS=true
+SMTP_SSL=false
+SMTP_TIMEOUT_SECONDS=10
+```
+
+For implicit TLS on port 465, set `SMTP_PORT=465`, `SMTP_SSL=true`, and
+`SMTP_STARTTLS=false`. The two TLS modes cannot both be enabled. `SMTP_FROM` is
+required whenever `SMTP_HOST` is set. Leave `SMTP_HOST` blank to disable email:
+OTP endpoints return `503` and do not keep a pending code that could never be
+delivered. A failed SMTP send returns a generic `502` and also clears the
+pending code.
+
+For local testing, point the settings at a local SMTP catcher such as Mailpit or
+MailHog. For example, with Mailpit listening on `127.0.0.1:1025`:
+
+```dotenv
+SMTP_HOST=127.0.0.1
+SMTP_PORT=1025
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM=dev@tutormatch.local
+SMTP_STARTTLS=false
+SMTP_SSL=false
+```
+
+Then set `LOGIN_OTP_REQUIRED=true` to exercise the second-factor login flow. In
+production, enabling `LOGIN_OTP_REQUIRED` without `SMTP_HOST` is rejected at
+startup. The code is included only in the email body; it is never returned by an
+endpoint or logged. SMTP responses and credentials are not exposed to clients.
+Alert emails are not sent yet; security events remain in the bounded in-memory
+list until the alert notifier is added.
+
 ## Production deployment (Docker Compose)
 
 The repository root contains a PostgreSQL + API stack. It uses the production
@@ -151,7 +195,9 @@ Invoke-RestMethod http://127.0.0.1:8000/ready
 Compose requires both secrets and refuses to start without them. Use a
 URL-safe database password (letters, digits, `-`, `_`, `.`) because the password
 is embedded in `DATABASE_URL`; percent-encode reserved characters if you use a
-different password. The API container applies `alembic upgrade head` before
+different password. To enable email, export the `SMTP_*` variables from the
+[Email delivery](#email-delivery-smtp) section before running Compose; the API
+service forwards them into the container. The API container applies `alembic upgrade head` before
 starting uvicorn. That is convenient for one replica; for multiple replicas run
 migrations as a separate release job and remove the migration from the container
 command so only one process changes the schema.
@@ -274,10 +320,10 @@ Email OTP verification is a separate one-time-code step. CAPTCHA challenges are
 small in-memory puzzles and are expired automatically. When
 `LOGIN_OTP_REQUIRED=true`, `/auth/login` verifies the password and returns a
 short-lived `challenge_id` instead of tokens; `/auth/login/otp/verify` completes
-the login. The default is `false` so the seeded demo accounts keep working until
-SMTP delivery is configured. Email delivery is not part of this small demo; the
-endpoint stores the code and waits for a later mail transport. SMTP is never
-configured in this repo.
+the login. The default is `false` so the seeded demo accounts keep working
+without email. Both OTP flows send the code through the configured SMTP
+transport; see [Email delivery](#email-delivery-smtp). The code is never returned
+by an endpoint or written to a log.
 
 Passwords are hashed with Argon2id through passlib. New passwords need at least
 10 characters, upper and lower case, a digit, a symbol, and must not be a common

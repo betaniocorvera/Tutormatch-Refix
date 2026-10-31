@@ -163,6 +163,16 @@ class InvalidEmailVerification(AppError):
     detail = "That verification code is wrong, expired, or already used."
 
 
+class EmailDeliveryUnavailable(AppError):
+    status_code = 503
+    detail = "Email delivery is not configured. Try again later."
+
+
+class EmailDeliveryFailed(AppError):
+    status_code = 502
+    detail = "We couldn't send that email. Try again later."
+
+
 class Forbidden(AppError):
     status_code = 403
     detail = "You do not have access to that."

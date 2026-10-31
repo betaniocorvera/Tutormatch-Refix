@@ -42,6 +42,7 @@ from ..security import (
     TokenService,
 )
 from ..transactions import TransactionFactory, no_transaction
+from .email import EmailService, UnavailableEmailTransport
 from .lockout import AccountLockout
 from .rate_limit import LoginRateLimiter
 from .security_events import SecurityEventService
@@ -73,6 +74,7 @@ class AuthService:
         transaction: TransactionFactory | None = None,
         account_lockout: AccountLockout | None = None,
         security_events: SecurityEventService | None = None,
+        email_service: EmailService | None = None,
         email_otp: EmailOTPService | None = None,
         login_otp_challenges: LoginOTPChallengeService | None = None,
         login_otp_required: bool = False,
@@ -87,6 +89,9 @@ class AuthService:
         self._transaction = transaction or no_transaction
         self._account_lockout = account_lockout or AccountLockout(5, 900)
         self._security_events = security_events or SecurityEventService()
+        self._email = email_service or EmailService(
+            UnavailableEmailTransport()
+        )
         self._email_otp = email_otp or EmailOTPService()
         self._login_otp_challenges = (
             login_otp_challenges or LoginOTPChallengeService()
@@ -218,6 +223,7 @@ class AuthService:
                 user_id=user.id,
                 email=str(user.email),
                 email_otp=self._email_otp,
+                email_service=self._email,
             )
             self._security_events.record(
                 "login_otp_sent",

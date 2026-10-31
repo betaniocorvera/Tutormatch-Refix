@@ -12,8 +12,10 @@ from tests.registration import COMPLIANT_PASSWORD, registration_payload
 
 
 @pytest.fixture()
-def otp_app(settings: Settings):
-    return create_app(replace(settings, login_otp_required=True))
+def otp_app(settings: Settings, email_outbox):
+    app = create_app(replace(settings, login_otp_required=True))
+    app.state.container.email.transport = email_outbox
+    return app
 
 
 @pytest.fixture()
@@ -39,6 +41,7 @@ def _login(client: TestClient, email: str = "student@example.com"):
 def test_login_returns_an_otp_challenge_instead_of_tokens(
     otp_app,
     otp_client: TestClient,
+    email_outbox,
 ) -> None:
     assert _register(otp_client).status_code == 201
 
@@ -51,8 +54,32 @@ def test_login_returns_an_otp_challenge_instead_of_tokens(
     assert body["expires_at"]
     assert "access_token" not in body
     assert "refresh_token" not in body
+    assert "code" not in body
+    assert len(email_outbox.messages) == 1
+    code = otp_app.state.container.email_otp._codes[
+        "student@example.com"
+    ].code
+    assert email_outbox.messages[0].to == "student@example.com"
+    assert code in email_outbox.messages[0].body
     events = otp_app.state.container.security_events.events
     assert [event.event_type for event in events].count("login_otp_sent") == 1
+
+
+def test_login_otp_delivery_failure_does_not_issue_a_challenge(
+    settings: Settings,
+) -> None:
+    app = create_app(replace(settings, login_otp_required=True))
+    with TestClient(app) as client:
+        assert _register(client).status_code == 201
+
+        response = _login(client)
+
+    assert response.status_code == 503
+    assert "code" not in response.json()
+    assert app.state.container.email_otp._codes == {}
+    assert app.state.container.login_otp_challenges._by_id == {}
+    events = app.state.container.security_events.events
+    assert [event.event_type for event in events].count("login_otp_sent") == 0
 
 
 def test_login_otp_verifies_once_and_issues_tokens(

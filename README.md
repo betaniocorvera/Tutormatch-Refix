@@ -163,6 +163,9 @@ paths.
   address exists. Validation errors omit the submitted password and answers.
 - Access tokens last 15 minutes. Refresh tokens last 7 days, rotate on use, and
   are revoked on logout.
+- Email OTP delivery uses SMTP. The code appears only in the email body; it is
+  never returned by an endpoint or written to logs. Missing or failed delivery
+  returns a generic error and does not keep a pending code.
 - `APP_ENV=production` requires a real `JWT_SECRET`; development may generate an
   ephemeral secret, which invalidates tokens on restart.
 - Every profile, match, request, conversation, message, session, call, and

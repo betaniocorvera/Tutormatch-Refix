@@ -102,6 +102,14 @@ class Settings:
     login_otp_required: bool = False
     login_lockout_attempts: int = 5
     login_lockout_seconds: int = 900
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = field(default="", repr=False)
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    smtp_ssl: bool = False
+    smtp_timeout_seconds: float = 10.0
     cors_origins: tuple[str, ...] = ("http://localhost:8080",)
     secret_is_ephemeral: bool = False
     database_url: str = field(default="", repr=False)
@@ -133,6 +141,30 @@ class Settings:
             raise ValueError("LOGIN_LOCKOUT_ATTEMPTS must be positive")
         if self.login_lockout_seconds <= 0:
             raise ValueError("LOGIN_LOCKOUT_SECONDS must be positive")
+        smtp_host = self.smtp_host.strip()
+        smtp_username = self.smtp_username.strip()
+        smtp_from = self.smtp_from.strip()
+        object.__setattr__(self, "smtp_host", smtp_host)
+        object.__setattr__(self, "smtp_username", smtp_username)
+        object.__setattr__(self, "smtp_from", smtp_from)
+        if not 1 <= self.smtp_port <= 65535:
+            raise ValueError("SMTP_PORT must be between 1 and 65535")
+        if self.smtp_timeout_seconds <= 0:
+            raise ValueError("SMTP_TIMEOUT_SECONDS must be positive")
+        if self.smtp_ssl and self.smtp_starttls:
+            raise ValueError(
+                "SMTP_SSL and SMTP_STARTTLS cannot both be true; "
+                "set SMTP_STARTTLS=false when using implicit TLS"
+            )
+        if smtp_host and not smtp_from:
+            raise ValueError(
+                "SMTP_FROM is required when SMTP_HOST is set"
+            )
+        if env == "production" and self.login_otp_required and not smtp_host:
+            raise ValueError(
+                "SMTP_HOST is required when LOGIN_OTP_REQUIRED=true "
+                "in production"
+            )
         if self.snapshot_debounce_seconds < 0:
             raise ValueError("SNAPSHOT_DEBOUNCE_SECONDS cannot be negative")
         for origin in self.cors_origins:
@@ -264,6 +296,14 @@ class Settings:
             login_otp_required=_env_bool("LOGIN_OTP_REQUIRED", False),
             login_lockout_attempts=_env_int("LOGIN_LOCKOUT_ATTEMPTS", 5),
             login_lockout_seconds=_env_int("LOGIN_LOCKOUT_SECONDS", 900),
+            smtp_host=os.getenv("SMTP_HOST", ""),
+            smtp_port=_env_int("SMTP_PORT", 587),
+            smtp_username=os.getenv("SMTP_USERNAME", ""),
+            smtp_password=os.getenv("SMTP_PASSWORD", ""),
+            smtp_from=os.getenv("SMTP_FROM", ""),
+            smtp_starttls=_env_bool("SMTP_STARTTLS", True),
+            smtp_ssl=_env_bool("SMTP_SSL", False),
+            smtp_timeout_seconds=_env_float("SMTP_TIMEOUT_SECONDS", 10.0),
             cors_origins=cors_origins,
             database_url=os.getenv("DATABASE_URL", ""),
             test_database_url=os.getenv("TEST_DATABASE_URL", ""),

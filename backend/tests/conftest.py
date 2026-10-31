@@ -14,7 +14,31 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.services.email import OutboundEmail
 from tests.registration import COMPLIANT_PASSWORD, registration_payload
+
+
+class RecordingEmailTransport:
+    """Collect messages in memory instead of opening an SMTP connection."""
+
+    def __init__(self) -> None:
+        self.messages: list[OutboundEmail] = []
+
+    def send(self, message: OutboundEmail) -> None:
+        self.messages.append(message)
+
+
+@pytest.fixture()
+def email_outbox() -> RecordingEmailTransport:
+    return RecordingEmailTransport()
+
+
+@pytest.fixture()
+def recording_email(app, email_outbox):
+    """Attach a recording transport to the app's shared email service."""
+
+    app.state.container.email.transport = email_outbox
+    return email_outbox
 
 
 @pytest.fixture()

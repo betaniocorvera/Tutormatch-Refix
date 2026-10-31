@@ -31,11 +31,13 @@ def start_email_verification(
     payload: EmailVerificationStart,
     container: ContainerDep,
 ) -> dict[str, str]:
-    """Create and remember a one-time code after a CAPTCHA success."""
+    """Create and email a one-time code after a CAPTCHA success."""
 
     container.captcha.verify(payload.captcha_id, payload.captcha_answer)
     expires_at = container.email_otp.start(
         email=str(payload.email),
+        email_service=container.email,
+        purpose="email verification",
     )
     return {"status": "sent", "expires_at": expires_at.isoformat()}
 

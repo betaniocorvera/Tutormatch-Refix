@@ -20,6 +20,7 @@ from ..errors import (
     InvalidEmailVerification,
     RateLimited,
 )
+from .email import EmailService
 
 _CAPTCHA_TTL = timedelta(minutes=10)
 _CAPTCHA_MAX_ATTEMPTS = 3
@@ -165,21 +166,45 @@ class EmailOTPService:
         self,
         *,
         email: str,
-        subject: str = "Your TutorMatch verification code",
+        email_service: EmailService | None = None,
+        purpose: str = "email verification",
+        subject: str | None = None,
     ) -> datetime:
-        """Create an OTP for one email address."""
+        """Create an OTP and optionally deliver it.
+
+        The code stays inside this service. If delivery fails, the pending code
+        is removed so a later verification attempt cannot succeed with a code
+        that was never sent.
+        """
 
         now = datetime.now(timezone.utc)
         normalized = self._normalize_email(email)
         code = "".join(secrets.choice(_OTP_ALPHABET) for _ in range(_OTP_LENGTH))
+        expires_at = now + _OTP_TTL
         with self._lock:
             self._codes[normalized] = _EmailOTPCode(
                 email=normalized,
                 code=code,
-                expires_at=now + _OTP_TTL,
+                expires_at=expires_at,
             )
             self._gc(now)
-            return self._codes[normalized].expires_at
+
+        if email_service is not None:
+            try:
+                email_service.send_otp(
+                    to=normalized,
+                    code=code,
+                    expires_at=expires_at,
+                    purpose=purpose,
+                    subject=subject,
+                )
+            except Exception:
+                with self._lock:
+                    current = self._codes.get(normalized)
+                    if current is not None and current.code == code:
+                        self._codes.pop(normalized, None)
+                raise
+        return expires_at
 
     def verify(self, email: str, code: str) -> None:
         """Consume an OTP; raise when it is wrong, expired, or over-attempted."""
@@ -238,7 +263,7 @@ class LoginOTPChallengeService:
     """Links one pending email code to one password-verified user.
 
     The challenge ID is the only value returned to the client. The code stays
-    server-side until it is delivered by a future mail transport.
+    server-side and is delivered by the configured email service.
     """
 
     def __init__(self) -> None:
@@ -252,9 +277,14 @@ class LoginOTPChallengeService:
         user_id: str,
         email: str,
         email_otp: EmailOTPService,
+        email_service: EmailService | None = None,
     ) -> LoginOTPChallenge:
         normalized = email.strip().casefold()
-        expires_at = email_otp.start(email=normalized)
+        expires_at = email_otp.start(
+            email=normalized,
+            email_service=email_service,
+            purpose="sign-in",
+        )
         now = datetime.now(timezone.utc)
         challenge = LoginOTPChallenge(
             challenge_id=secrets.token_urlsafe(32),

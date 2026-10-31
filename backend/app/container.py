@@ -32,6 +32,11 @@ from .security import PasswordHasher, TokenService
 from .services.auth import AuthService
 from .services.broadcast import ConversationBroadcaster
 from .services.chat import ChatService
+from .services.email import (
+    EmailService,
+    SmtpEmailTransport,
+    UnavailableEmailTransport,
+)
 from .services.lockout import AccountLockout
 from .services.matching import MatchingService
 from .services.security_events import SecurityEventService
@@ -133,6 +138,12 @@ class AppContainer:
         )
         self.security_events = SecurityEventService()
         self.captcha = CAPTCHAService()
+        email_transport = (
+            SmtpEmailTransport(settings)
+            if settings.smtp_host
+            else UnavailableEmailTransport()
+        )
+        self.email = EmailService(email_transport)
         self.email_otp = EmailOTPService()
         self.login_otp_challenges = LoginOTPChallengeService()
         self.auth = AuthService(
@@ -146,6 +157,7 @@ class AppContainer:
             transaction=self.transaction,
             account_lockout=self.account_lockout,
             security_events=self.security_events,
+            email_service=self.email,
             email_otp=self.email_otp,
             login_otp_challenges=self.login_otp_challenges,
             login_otp_required=settings.login_otp_required,

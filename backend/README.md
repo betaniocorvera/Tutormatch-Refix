@@ -136,9 +136,9 @@ Open http://127.0.0.1:8000/docs for the generated API docs.
 
 ## Email delivery (SMTP)
 
-Email verification and the optional login OTP use a standard SMTP server. Add
-the settings to `backend/.env`; use an app password or a dedicated SMTP
-credential, never a normal mailbox password:
+Email verification, the optional login OTP, and security alerts use a standard
+SMTP server. Add the settings to `backend/.env`; use an app password or a
+dedicated SMTP credential, never a normal mailbox password:
 
 ```dotenv
 SMTP_HOST=smtp.example.com
@@ -175,8 +175,20 @@ Then set `LOGIN_OTP_REQUIRED=true` to exercise the second-factor login flow. In
 production, enabling `LOGIN_OTP_REQUIRED` without `SMTP_HOST` is rejected at
 startup. The code is included only in the email body; it is never returned by an
 endpoint or logged. SMTP responses and credentials are not exposed to clients.
-Alert emails are not sent yet; security events remain in the bounded in-memory
-list until the alert notifier is added.
+
+When SMTP is configured, the account owner also receives a generic security
+alert for:
+
+- a successful new sign-in
+- an account lockout
+- three failed login-OTP attempts within 15 minutes
+
+Alerts are sent in the background and are best-effort: a slow or failing SMTP
+server never delays or fails login, OTP verification, or registration. A
+five-minute cooldown per alert type and account prevents duplicate messages, and
+unknown email addresses are never sent alerts. Alert emails contain no password,
+OTP, token, or security answer. Security events remain in the bounded in-memory
+list for the future dashboard.
 
 ## Production deployment (Docker Compose)
 
@@ -339,8 +351,9 @@ an account-scoped lockout blocks the address for `LOGIN_LOCKOUT_SECONDS` after
 `LOGIN_LOCKOUT_ATTEMPTS` failures. The email-verification service also keeps its
 own attempt limit per email address and only verifies a code once. Login success,
 login failure, lockout, OTP send, and OTP failure events are recorded in a
-bounded in-memory security-event list; the list is the hand-off point for future
-alert email delivery and the security dashboard.
+bounded in-memory security-event list. Selected events also trigger a
+best-effort email to the account owner; the list remains the hand-off point for
+the security dashboard.
 
 ## Profile endpoints
 

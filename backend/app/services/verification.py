@@ -301,6 +301,12 @@ class LoginOTPChallengeService:
             self._gc(now)
         return challenge
 
+    def get(self, challenge_id: str) -> LoginOTPChallenge | None:
+        """Return a pending challenge without consuming it."""
+
+        with self._lock:
+            return self._by_id.get(challenge_id)
+
     def verify(
         self,
         challenge_id: str,

@@ -7,11 +7,15 @@ security answers. The service is bounded and thread-safe.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,11 +30,17 @@ class SecurityEvent:
 
 
 class SecurityEventService:
-    def __init__(self, max_events: int = 1000) -> None:
+    def __init__(
+        self,
+        max_events: int = 1000,
+        *,
+        on_event: Callable[[SecurityEvent], None] | None = None,
+    ) -> None:
         if max_events <= 0:
             raise ValueError("max_events must be positive")
         self._events: deque[SecurityEvent] = deque(maxlen=max_events)
         self._lock = threading.Lock()
+        self._on_event = on_event
 
     def record(
         self,
@@ -52,6 +62,11 @@ class SecurityEventService:
         )
         with self._lock:
             self._events.append(event)
+        if self._on_event is not None:
+            try:
+                self._on_event(event)
+            except Exception:
+                logger.warning("A security event listener failed.")
         return event
 
     @property

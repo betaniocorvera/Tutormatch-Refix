@@ -250,6 +250,7 @@ class AuthService:
         code: str,
         client_key: str,
     ) -> AuthResult:
+        pending_challenge = self._login_otp_challenges.get(challenge_id)
         try:
             challenge = self._login_otp_challenges.verify(
                 challenge_id,
@@ -259,6 +260,16 @@ class AuthService:
         except (InvalidEmailVerification, RateLimited):
             self._security_events.record(
                 "login_otp_failed",
+                user_id=(
+                    pending_challenge.user_id
+                    if pending_challenge is not None
+                    else None
+                ),
+                email=(
+                    pending_challenge.email
+                    if pending_challenge is not None
+                    else None
+                ),
                 client_key=client_key,
             )
             raise

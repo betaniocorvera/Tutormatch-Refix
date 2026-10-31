@@ -39,6 +39,7 @@ from .services.email import (
 )
 from .services.lockout import AccountLockout
 from .services.matching import MatchingService
+from .services.security_alerts import SecurityAlertNotifier
 from .services.security_events import SecurityEventService
 from .services.verification import (
     CAPTCHAService,
@@ -136,7 +137,6 @@ class AppContainer:
             settings.login_lockout_attempts,
             settings.login_lockout_seconds,
         )
-        self.security_events = SecurityEventService()
         self.captcha = CAPTCHAService()
         email_transport = (
             SmtpEmailTransport(settings)
@@ -144,6 +144,10 @@ class AppContainer:
             else UnavailableEmailTransport()
         )
         self.email = EmailService(email_transport)
+        self.security_alerts = SecurityAlertNotifier(self.email)
+        self.security_events = SecurityEventService(
+            on_event=self.security_alerts.notify
+        )
         self.email_otp = EmailOTPService()
         self.login_otp_challenges = LoginOTPChallengeService()
         self.auth = AuthService(
@@ -191,5 +195,8 @@ class AppContainer:
         try:
             self.snapshot.close()
         finally:
-            if self.database is not None:
-                self.database.dispose()
+            try:
+                self.security_alerts.close()
+            finally:
+                if self.database is not None:
+                    self.database.dispose()

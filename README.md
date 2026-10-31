@@ -165,7 +165,10 @@ paths.
   are revoked on logout.
 - Email OTP delivery uses SMTP. The code appears only in the email body; it is
   never returned by an endpoint or written to logs. Missing or failed delivery
-  returns a generic error and does not keep a pending code.
+  returns a generic error and does not keep a pending code. When SMTP is
+  configured, the account owner also gets best-effort alerts for new sign-ins,
+  lockouts, and repeated login-OTP failures; alerts never block authentication
+  and never include passwords, OTPs, tokens, or security answers.
 - `APP_ENV=production` requires a real `JWT_SECRET`; development may generate an
   ephemeral secret, which invalidates tokens on restart.
 - Every profile, match, request, conversation, message, session, call, and

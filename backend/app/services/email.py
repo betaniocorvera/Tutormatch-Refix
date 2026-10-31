@@ -112,6 +112,58 @@ class EmailService:
     def __init__(self, transport: EmailTransport) -> None:
         self.transport = transport
 
+    @property
+    def is_configured(self) -> bool:
+        """Whether a real or injected transport can attempt delivery."""
+
+        return not isinstance(self.transport, UnavailableEmailTransport)
+
+    def send_security_alert(
+        self,
+        *,
+        to: str,
+        event_type: str,
+        occurred_at: datetime,
+    ) -> None:
+        """Send a generic account-security notice to the account owner."""
+
+        labels = {
+            "login_succeeded": (
+                "A new sign-in to your TutorMatch account was completed."
+            ),
+            "account_locked": (
+                "Your TutorMatch account was temporarily locked after "
+                "repeated failed sign-in attempts."
+            ),
+            "login_otp_failed": (
+                "Several incorrect verification codes were entered for "
+                "your TutorMatch account."
+            ),
+        }
+        label = labels.get(
+            event_type,
+            "A security event occurred on your TutorMatch account.",
+        )
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        timestamp = occurred_at.astimezone(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
+        body = (
+            "TutorMatch security alert\n\n"
+            f"{label}\n\n"
+            f"Time: {timestamp}\n\n"
+            "If this was you, no action is needed. If not, contact "
+            "TutorMatch support immediately.\n"
+        )
+        self.transport.send(
+            OutboundEmail(
+                to=to,
+                subject="TutorMatch security alert",
+                body=body,
+            )
+        )
+
     def send_otp(
         self,
         *,

@@ -148,6 +148,40 @@ def test_login_otp_rejects_wrong_codes_without_tokens(
     assert [event.event_type for event in events].count("login_otp_failed") == 1
 
 
+def test_repeated_login_otp_failures_send_one_alert(
+    otp_app,
+    otp_client: TestClient,
+    email_outbox,
+) -> None:
+    assert _register(otp_client).status_code == 201
+    challenge = _login(otp_client).json()
+    actual = otp_app.state.container.email_otp._codes[
+        "student@example.com"
+    ].code
+    wrong = "000000" if actual != "000000" else "111111"
+
+    for _ in range(3):
+        response = otp_client.post(
+            "/auth/login/otp/verify",
+            json={
+                "challenge_id": challenge["challenge_id"],
+                "code": wrong,
+            },
+        )
+        assert response.status_code == 422
+
+    assert otp_app.state.container.security_alerts.wait_for_idle()
+    alerts = [
+        message
+        for message in email_outbox.messages
+        if message.subject == "TutorMatch security alert"
+    ]
+    assert len(alerts) == 1
+    assert "verification codes" in alerts[0].body.lower()
+    assert actual not in alerts[0].body
+    assert actual not in alerts[0].subject
+
+
 def test_security_events_do_not_store_passwords_or_otp_codes(
     otp_app,
     otp_client: TestClient,

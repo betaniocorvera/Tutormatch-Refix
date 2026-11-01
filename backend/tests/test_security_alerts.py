@@ -83,6 +83,28 @@ def test_lockout_sends_a_security_alert() -> None:
     assert "locked" in transport.messages[0].body.lower()
 
 
+def test_password_change_sends_a_security_alert() -> None:
+    transport = _RecordingTransport()
+    notifier = _notifier(transport)
+
+    notifier.notify(_event("password_changed"))
+
+    assert len(transport.messages) == 1
+    assert "password was changed" in transport.messages[0].body.lower()
+
+
+def test_refresh_token_reuse_sends_a_security_alert() -> None:
+    transport = _RecordingTransport()
+    notifier = _notifier(transport)
+
+    notifier.notify(_event("refresh_token_reuse"))
+
+    assert len(transport.messages) == 1
+    assert "refresh sessions were revoked" in (
+        transport.messages[0].body.lower()
+    )
+
+
 def test_repeated_otp_failures_send_one_alert_at_the_threshold() -> None:
     transport = _RecordingTransport()
     notifier = _notifier(transport)

@@ -33,7 +33,8 @@ Copy-Item .env.example .env
 The API is at <http://127.0.0.1:8000>, with generated docs at
 <http://127.0.0.1:8000/docs>. The default `.env.example` allows the Flutter web
 development origin `http://localhost:8080` through CORS. Change
-`CORS_ORIGINS` (comma-separated) if the client runs on another origin.
+`CORS_ORIGINS` (comma-separated) if the client runs on another origin, and set
+`ALLOWED_HOSTS` if the API is reached through a different hostname.
 
 The backend starts with in-memory storage and needs no database. For PostgreSQL,
 set `STORAGE_BACKEND=postgres` and `DATABASE_URL` in `backend/.env`, then run
@@ -162,21 +163,23 @@ paths.
 - Duplicate-email responses use one neutral message instead of confirming which
   address exists. Validation errors omit the submitted password and answers.
 - Access tokens last 15 minutes. Refresh tokens last 7 days, rotate on use, and
-  are revoked on logout. A completed password reset revokes every refresh token
-  for the account.
+  are revoked on logout. A completed password reset or password change revokes
+  every refresh token for the account. Reusing a rotated refresh token revokes
+  all refresh tokens again and records a security event.
 - Forgot-password requests require a CAPTCHA, are rate-limited, and return the
   same response whether or not the email is registered. Reset codes are
   purpose-scoped, expire, allow three attempts, and are consumed on use.
 - Changing a password while signed in requires the current password and applies
   the same policy. A successful change revokes every refresh token, clears any
-  pending reset code, and records a security event. The current access token
-  remains valid until it expires.
+  pending reset code, records a security event, and sends an alert email when
+  SMTP is configured. The current access token remains valid until it expires.
 - Email OTP delivery uses SMTP. The code appears only in the email body; it is
   never returned by an endpoint or written to logs. Missing or failed delivery
   returns a generic error and does not keep a pending code. When SMTP is
   configured, the account owner also gets best-effort alerts for new sign-ins,
-  lockouts, and repeated login-OTP failures; alerts never block authentication
-  and never include passwords, OTPs, tokens, or security answers.
+  lockouts, repeated login-OTP failures, refresh-token reuse, and password
+  changes or resets; alerts never block authentication and never include
+  passwords, OTPs, tokens, or security answers.
 - `APP_ENV=production` requires a real `JWT_SECRET`; development may generate an
   ephemeral secret, which invalidates tokens on restart.
 - Every profile, match, request, conversation, message, session, call, and
@@ -186,3 +189,9 @@ paths.
   duration.
 - API errors are generic where they could reveal account existence, and
   `.env` is gitignored. Use `.env.example` as the template.
+
+The API also enforces an `ALLOWED_HOSTS` allow-list, sends browser security
+headers, marks authentication responses `no-store`, rejects oversized JSON
+bodies, rate-limits CAPTCHA and email-verification starts, and requires browser
+WebSocket origins to match `CORS_ORIGINS`. See
+[`backend/README.md`](backend/README.md#http-hardening) for the settings.

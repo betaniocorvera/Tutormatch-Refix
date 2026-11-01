@@ -135,6 +135,40 @@ def test_refresh_rotates_and_old_refresh_token_cannot_be_reused(
     assert me.status_code == 200
 
 
+def test_refresh_reuse_revokes_every_refresh_token(
+    app,
+    client: TestClient,
+    auth_tokens,
+) -> None:
+    old_refresh = auth_tokens["refresh_token"]
+
+    refreshed = client.post(
+        "/auth/refresh",
+        json={"refresh_token": old_refresh},
+    )
+    assert refreshed.status_code == 200
+    replacement = refreshed.json()["refresh_token"]
+
+    reused = client.post(
+        "/auth/refresh",
+        json={"refresh_token": old_refresh},
+    )
+    assert reused.status_code == 401
+
+    replacement_result = client.post(
+        "/auth/refresh",
+        json={"refresh_token": replacement},
+    )
+    assert replacement_result.status_code == 401
+
+    events = app.state.container.security_events.events
+    assert any(
+        event.event_type == "refresh_token_reuse"
+        and event.user_id == auth_tokens["user"]["id"]
+        for event in events
+    )
+
+
 def test_refresh_rejects_access_token(
     client: TestClient,
     auth_tokens,

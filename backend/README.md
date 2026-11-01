@@ -182,6 +182,8 @@ alert for:
 - a successful new sign-in
 - an account lockout
 - three failed login-OTP attempts within 15 minutes
+- reuse of a rotated refresh token
+- a completed password change or password reset
 
 Alerts are sent in the background and are best-effort: a slow or failing SMTP
 server never delays or fails login, OTP verification, or registration. A
@@ -209,7 +211,10 @@ URL-safe database password (letters, digits, `-`, `_`, `.`) because the password
 is embedded in `DATABASE_URL`; percent-encode reserved characters if you use a
 different password. To enable email, export the `SMTP_*` variables from the
 [Email delivery](#email-delivery-smtp) section before running Compose; the API
-service forwards them into the container. The API container applies `alembic upgrade head` before
+service forwards them into the container. Set `ALLOWED_HOSTS` to the public API
+hostname when it is not `localhost`; keep `127.0.0.1` in the list for the
+container healthcheck. Compose defaults it to `localhost,127.0.0.1`. The API
+container applies `alembic upgrade head` before
 starting uvicorn. That is convenient for one replica; for multiple replicas run
 migrations as a separate release job and remove the migration from the container
 command so only one process changes the schema.
@@ -295,6 +300,25 @@ origins to allow another development host. Trailing slashes and non-HTTP origins
 are rejected. The Flutter origin and API origin are different in development, so
 the browser must be opened at the exact allowed origin.
 
+### HTTP hardening
+
+- `ALLOWED_HOSTS` is a comma-separated Host header allow-list. The development
+  default is `localhost,127.0.0.1,testserver`; it is required when
+  `APP_ENV=production`, and must be set to the public API hostname. Wildcards
+  are rejected.
+- Every API response carries `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a restrictive
+  `Permissions-Policy`, and a `default-src 'none'` CSP. Production also sends
+  HSTS. `/auth/*` responses are marked `Cache-Control: no-store`.
+- `MAX_JSON_BODY_BYTES` rejects declared non-multipart request bodies above the
+  limit with `413`. Image and voice uploads keep their own size checks.
+- CAPTCHA issuance and email-verification starts are rate-limited per client IP
+  and email. A reverse proxy should also enforce connection and request limits.
+- Browser WebSocket connections must send an `Origin` that is in
+  `CORS_ORIGINS`; native clients without an `Origin` header are still accepted.
+- Refresh-token reuse revokes all refresh tokens for the account and records a
+  security event. Access tokens remain valid until their normal expiry.
+
 ## Test
 
 ```powershell
@@ -353,9 +377,9 @@ a generic `503` for every address.
 Changing a password while signed in requires the current password and applies the
 same password policy. The new password must differ from the current one. A
 successful change revokes every refresh token, clears any pending password-reset
-code, and records a `password_changed` event. The current access token remains
-valid until it expires; the client must sign in again with the new password to
-get a fresh refresh token.
+code, records a `password_changed` event, and sends a best-effort alert email
+when SMTP is configured. The current access token remains valid until it expires;
+the client must sign in again with the new password to get a fresh refresh token.
 
 Passwords are hashed with Argon2id through passlib. New passwords need at least
 10 characters, upper and lower case, a digit, a symbol, and must not be a common
@@ -366,15 +390,20 @@ logged. Validation errors are stripped of the submitted `input` and `ctx`, so a
 password or answer cannot be echoed back in a 422 response.
 
 Access tokens last 15 minutes by default; refresh tokens last 7 days and rotate
-on use. Login failures are rate-limited in memory per client IP and email, and
-an account-scoped lockout blocks the address for `LOGIN_LOCKOUT_SECONDS` after
-`LOGIN_LOCKOUT_ATTEMPTS` failures. Password-reset requests use a separate limiter
-controlled by `PASSWORD_RESET_RATE_LIMIT_ATTEMPTS` and
-`PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS`. Change-password attempts use their own
-limiter with the login rate-limit settings. The OTP services also keep their own
-attempt limits per email and scope, and only verify a code once. Login success,
-login failure, lockout, OTP send, OTP failure, password-reset request,
-password-reset completion, password-change failure, and password-change
+on use. Presenting a refresh token that has already been rotated is treated as
+possible theft: every refresh token for the account is revoked and a
+`refresh_token_reuse` event is recorded. Login failures are rate-limited in
+memory per client IP and email, and an account-scoped lockout blocks the address
+for `LOGIN_LOCKOUT_SECONDS` after `LOGIN_LOCKOUT_ATTEMPTS` failures.
+Password-reset requests use a separate limiter controlled by
+`PASSWORD_RESET_RATE_LIMIT_ATTEMPTS` and
+`PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS`. Change-password attempts use their
+own limiter with the login rate-limit settings. CAPTCHA issuance and
+email-verification starts are limited by `CAPTCHA_RATE_LIMIT_*` and
+`EMAIL_VERIFICATION_RATE_LIMIT_*`. The OTP services also keep their own attempt
+limits per email and scope, and only verify a code once. Login success, login
+failure, lockout, OTP send, OTP failure, refresh-token reuse, password-reset
+request, password-reset completion, password-change failure, and password-change
 completion events are recorded in a bounded in-memory security-event list.
 Selected events also trigger a best-effort email to the account owner; the list
 remains the hand-off point for the security dashboard.

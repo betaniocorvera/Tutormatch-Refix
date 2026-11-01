@@ -171,9 +171,14 @@ def confirm_password_reset(
 @router.post("/refresh", response_model=AuthResponse)
 def refresh(
     payload: RefreshRequest,
+    request: Request,
     auth: AuthServiceDep,
 ) -> AuthResponse:
-    result = auth.refresh(payload.refresh_token)
+    client_key = request.client.host if request.client else "unknown"
+    result = auth.refresh(
+        payload.refresh_token,
+        client_key=client_key,
+    )
     return _auth_response(result, auth)
 
 

@@ -7,10 +7,12 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Settings
 from .container import AppContainer
 from .errors import install_exception_handlers
+from .middleware import JsonBodyLimitMiddleware, SecurityHeadersMiddleware
 from .routers import (
     auth,
     catalog,
@@ -45,11 +47,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.container = container
     app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=list(resolved_settings.allowed_hosts),
+    )
+    app.add_middleware(
+        JsonBodyLimitMiddleware,
+        max_bytes=resolved_settings.max_json_body_bytes,
+    )
+    app.add_middleware(
         CORSMiddleware,
         allow_origins=list(resolved_settings.cors_origins),
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        production=resolved_settings.app_env == "production",
     )
     install_exception_handlers(app)
     app.include_router(health.router)

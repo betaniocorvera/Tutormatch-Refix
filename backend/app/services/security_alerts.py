@@ -23,6 +23,9 @@ _ALERTED_EVENTS = frozenset(
         "login_succeeded",
         "account_locked",
         "login_otp_failed",
+        "refresh_token_reuse",
+        "password_changed",
+        "password_reset_completed",
     }
 )
 

@@ -141,6 +141,14 @@ class AppContainer:
             settings.login_rate_limit_attempts,
             settings.login_rate_limit_window_seconds,
         )
+        self.captcha_rate_limiter = LoginRateLimiter(
+            settings.captcha_rate_limit_attempts,
+            settings.captcha_rate_limit_window_seconds,
+        )
+        self.email_verification_rate_limiter = LoginRateLimiter(
+            settings.email_verification_rate_limit_attempts,
+            settings.email_verification_rate_limit_window_seconds,
+        )
         self.account_lockout = AccountLockout(
             settings.login_lockout_attempts,
             settings.login_lockout_seconds,

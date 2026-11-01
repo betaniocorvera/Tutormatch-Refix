@@ -139,6 +139,16 @@ class EmailService:
                 "Several incorrect verification codes were entered for "
                 "your TutorMatch account."
             ),
+            "refresh_token_reuse": (
+                "A previously used sign-in token was presented. For your "
+                "protection, all refresh sessions were revoked."
+            ),
+            "password_changed": (
+                "Your TutorMatch password was changed while signed in."
+            ),
+            "password_reset_completed": (
+                "Your TutorMatch password was reset using a one-time code."
+            ),
         }
         label = labels.get(
             event_type,

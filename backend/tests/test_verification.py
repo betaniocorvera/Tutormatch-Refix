@@ -5,11 +5,13 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import Settings
 from app.errors import (
     EmailDeliveryFailed,
     InvalidCaptcha,
     InvalidEmailVerification,
 )
+from app.main import create_app
 from app.services.email import OutboundEmail
 from app.services.verification import (
     EMAIL_VERIFICATION_SCOPE,
@@ -145,6 +147,61 @@ def test_captcha_response_never_includes_an_answer(client: TestClient) -> None:
 
     assert challenge["question"]
     assert "answer" not in challenge
+
+
+def test_captcha_requests_are_rate_limited() -> None:
+    settings = Settings(
+        jwt_secret="s" * 64,
+        captcha_rate_limit_attempts=1,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        first = client.get("/auth/captcha")
+        second = client.get("/auth/captcha")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["retry-after"]
+
+
+def test_email_verification_start_is_rate_limited() -> None:
+    class _Recorder:
+        def send(self, message: OutboundEmail) -> None:
+            return None
+
+    settings = Settings(
+        jwt_secret="s" * 64,
+        email_verification_rate_limit_attempts=1,
+    )
+    app = create_app(settings)
+    app.state.container.email.transport = _Recorder()
+
+    with TestClient(app) as client:
+        challenge = client.get("/auth/captcha").json()
+        answer = app.state.container.captcha._sessions[
+            challenge["id"]
+        ].answer
+        first = client.post(
+            "/auth/email-verification/start",
+            json=_start_body(
+                "student@example.com",
+                challenge["id"],
+                answer,
+            ),
+        )
+        second = client.post(
+            "/auth/email-verification/start",
+            json=_start_body(
+                "student@example.com",
+                "not-a-challenge",
+                "wrong",
+            ),
+        )
+
+    assert first.status_code == 202
+    assert second.status_code == 429
+    assert second.headers["retry-after"]
 
 
 def test_email_otp_can_be_verified_once(app) -> None:

@@ -35,6 +35,13 @@ async def conversation_events(
     conversation_id: str,
 ) -> None:
     container = websocket.app.state.container
+    origin = websocket.headers.get("origin")
+    if origin is not None and origin.rstrip("/") not in {
+        allowed.rstrip("/") for allowed in container.settings.cors_origins
+    }:
+        await websocket.close(code=4403)
+        return
+
     token = _bearer_token(websocket)
     if not token:
         await websocket.close(code=4401)

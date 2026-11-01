@@ -113,6 +113,16 @@ class Settings:
     smtp_ssl: bool = False
     smtp_timeout_seconds: float = 10.0
     cors_origins: tuple[str, ...] = ("http://localhost:8080",)
+    allowed_hosts: tuple[str, ...] = (
+        "localhost",
+        "127.0.0.1",
+        "testserver",
+    )
+    max_json_body_bytes: int = 1_000_000
+    captcha_rate_limit_attempts: int = 30
+    captcha_rate_limit_window_seconds: int = 900
+    email_verification_rate_limit_attempts: int = 5
+    email_verification_rate_limit_window_seconds: int = 900
     secret_is_ephemeral: bool = False
     database_url: str = field(default="", repr=False)
     test_database_url: str = field(default="", repr=False)
@@ -182,6 +192,44 @@ class Settings:
                 raise ValueError("CORS_ORIGINS entries must be http(s) origins")
             if origin.endswith("/"):
                 raise ValueError("CORS_ORIGINS entries must not end with /")
+
+        allowed_hosts: list[str] = []
+        for host in self.allowed_hosts:
+            cleaned = host.strip()
+            if (
+                not cleaned
+                or "*" in cleaned
+                or "://" in cleaned
+                or "/" in cleaned
+                or any(character.isspace() for character in cleaned)
+            ):
+                raise ValueError(
+                    "ALLOWED_HOSTS entries must be hostnames without a "
+                    "scheme, path, wildcard, or whitespace"
+                )
+            allowed_hosts.append(cleaned)
+        if not allowed_hosts:
+            raise ValueError("ALLOWED_HOSTS must contain at least one host")
+        object.__setattr__(self, "allowed_hosts", tuple(allowed_hosts))
+
+        if self.max_json_body_bytes <= 0:
+            raise ValueError("MAX_JSON_BODY_BYTES must be positive")
+        if self.captcha_rate_limit_attempts <= 0:
+            raise ValueError(
+                "CAPTCHA_RATE_LIMIT_ATTEMPTS must be positive"
+            )
+        if self.captcha_rate_limit_window_seconds <= 0:
+            raise ValueError(
+                "CAPTCHA_RATE_LIMIT_WINDOW_SECONDS must be positive"
+            )
+        if self.email_verification_rate_limit_attempts <= 0:
+            raise ValueError(
+                "EMAIL_VERIFICATION_RATE_LIMIT_ATTEMPTS must be positive"
+            )
+        if self.email_verification_rate_limit_window_seconds <= 0:
+            raise ValueError(
+                "EMAIL_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS must be positive"
+            )
 
         object.__setattr__(
             self,
@@ -286,6 +334,21 @@ class Settings:
             if raw_origins
             else ("http://localhost:8080",)
         )
+        raw_hosts = os.getenv("ALLOWED_HOSTS", "").strip()
+        app_env = os.getenv("APP_ENV", "development")
+        if app_env.strip().lower() == "production" and not raw_hosts:
+            raise ValueError(
+                "ALLOWED_HOSTS is required when APP_ENV=production"
+            )
+        allowed_hosts = (
+            tuple(
+                host.strip()
+                for host in raw_hosts.split(",")
+                if host.strip()
+            )
+            if raw_hosts
+            else ("localhost", "127.0.0.1", "testserver")
+        )
         return cls(
             app_env=os.getenv("APP_ENV", "development"),
             jwt_secret=os.getenv("JWT_SECRET", ""),
@@ -321,6 +384,27 @@ class Settings:
             smtp_ssl=_env_bool("SMTP_SSL", False),
             smtp_timeout_seconds=_env_float("SMTP_TIMEOUT_SECONDS", 10.0),
             cors_origins=cors_origins,
+            allowed_hosts=allowed_hosts,
+            max_json_body_bytes=_env_int(
+                "MAX_JSON_BODY_BYTES",
+                1_000_000,
+            ),
+            captcha_rate_limit_attempts=_env_int(
+                "CAPTCHA_RATE_LIMIT_ATTEMPTS",
+                30,
+            ),
+            captcha_rate_limit_window_seconds=_env_int(
+                "CAPTCHA_RATE_LIMIT_WINDOW_SECONDS",
+                900,
+            ),
+            email_verification_rate_limit_attempts=_env_int(
+                "EMAIL_VERIFICATION_RATE_LIMIT_ATTEMPTS",
+                5,
+            ),
+            email_verification_rate_limit_window_seconds=_env_int(
+                "EMAIL_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS",
+                900,
+            ),
             database_url=os.getenv("DATABASE_URL", ""),
             test_database_url=os.getenv("TEST_DATABASE_URL", ""),
             database_pool_size=_env_int("DATABASE_POOL_SIZE", 5),

@@ -183,6 +183,25 @@ def test_change_password_updates_hash_and_revokes_refresh_tokens(
     assert NEW_PASSWORD not in rendered
 
 
+def test_change_password_sends_a_security_alert(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    app,
+    recording_email,
+) -> None:
+    assert _change(client, auth_headers).status_code == 204
+    assert app.state.container.security_alerts.wait_for_idle()
+
+    alerts = [
+        message
+        for message in recording_email.messages
+        if message.subject == "TutorMatch security alert"
+    ]
+    assert len(alerts) == 1
+    assert "password was changed" in alerts[0].body.lower()
+    assert NEW_PASSWORD not in alerts[0].body
+
+
 def test_change_password_clears_a_pending_reset_code(
     client: TestClient,
     auth_tokens,

@@ -10,9 +10,15 @@ from tests.chat_helpers import (
 )
 
 
-def _close_code(client: TestClient, url: str) -> int | None:
+def _close_code(
+    client: TestClient,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> int | None:
     try:
-        with client.websocket_connect(url) as socket:
+        kwargs = {"headers": headers} if headers is not None else {}
+        with client.websocket_connect(url, **kwargs) as socket:
             socket.receive_json()
     except WebSocketDisconnect as exc:
         return exc.code
@@ -54,6 +60,33 @@ def test_websocket_rejects_missing_invalid_and_outsider_tokens(
         )
         == 4404
     )
+
+
+def test_websocket_rejects_unlisted_browser_origins(
+    client: TestClient,
+) -> None:
+    _student, tutor, conversation_id = accepted_conversation(client)
+    url = (
+        f"/ws/conversations/{conversation_id}"
+        f"?token={tutor['access_token']}"
+    )
+
+    assert (
+        _close_code(
+            client,
+            url,
+            headers={"Origin": "http://evil.example"},
+        )
+        == 4403
+    )
+
+    with client.websocket_connect(
+        url,
+        headers={"Origin": "http://localhost:8080"},
+    ) as socket:
+        ready = socket.receive_json()
+        assert ready["type"] == "ready"
+        assert ready["status"] == "accepted"
 
 
 def test_websocket_rejects_bad_cursors_and_accepts_a_bearer_header(

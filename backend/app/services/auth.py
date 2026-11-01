@@ -517,7 +517,12 @@ class AuthService:
                 ),
             )
 
-    def refresh(self, refresh_token: str) -> AuthResult:
+    def refresh(
+        self,
+        refresh_token: str,
+        *,
+        client_key: str | None = None,
+    ) -> AuthResult:
         payload = self._tokens.decode(refresh_token, REFRESH_TOKEN_TYPE)
         jti = payload.get("jti")
         user_id = payload.get("sub")
@@ -525,27 +530,60 @@ class AuthService:
             raise InvalidToken()
 
         with self._refresh_lock:
+            reuse_user_id: str | None = None
             with self._transaction():
                 stored = self._refresh_tokens.get_by_jti(jti)
-                if stored is None or stored.revoked_at is not None:
-                    raise InvalidToken()
-                if stored.user_id != user_id:
-                    raise InvalidToken()
-                if stored.expires_at <= datetime.now(timezone.utc):
+                if stored is None:
                     raise InvalidToken()
 
-                user = self._users.get_by_id(user_id)
-                if user is None:
-                    raise InvalidToken()
+                if stored.revoked_at is not None:
+                    # A rotated token was presented again. Treat it as a
+                    # possible theft and revoke every refresh session for the
+                    # account, including the replacement token.
+                    reuse_user_id = stored.user_id
+                elif stored.user_id != user_id:
+                    reuse_user_id = stored.user_id
+                else:
+                    if stored.expires_at <= datetime.now(timezone.utc):
+                        raise InvalidToken()
 
-                access = self._tokens.create_access_token(user)
-                new_refresh = self._tokens.create_refresh_token(user)
-                self._refresh_tokens.revoke(
-                    jti,
-                    replaced_by_jti=new_refresh.jti,
+                    user = self._users.get_by_id(user_id)
+                    if user is None:
+                        raise InvalidToken()
+
+                    access = self._tokens.create_access_token(user)
+                    new_refresh = self._tokens.create_refresh_token(user)
+                    self._refresh_tokens.revoke(
+                        jti,
+                        replaced_by_jti=new_refresh.jti,
+                    )
+                    self._store_refresh_token(user, new_refresh)
+
+            if reuse_user_id is not None:
+                # Commit the revocation before rejecting the request.
+                self._record_refresh_reuse(
+                    reuse_user_id,
+                    client_key=client_key,
                 )
-                self._store_refresh_token(user, new_refresh)
+                raise InvalidToken()
+
         return AuthResult(user=user, access=access, refresh=new_refresh)
+
+    def _record_refresh_reuse(
+        self,
+        user_id: str,
+        *,
+        client_key: str | None,
+    ) -> None:
+        self._refresh_tokens.revoke_all_for_user(user_id)
+        user = self._users.get_by_id(user_id)
+        self._security_events.record(
+            "refresh_token_reuse",
+            user_id=user_id,
+            email=str(user.email) if user is not None else None,
+            client_key=client_key,
+            detail="a rotated refresh token was reused",
+        )
 
     def logout(self, user: User, refresh_token: str | None) -> None:
         with self._transaction():

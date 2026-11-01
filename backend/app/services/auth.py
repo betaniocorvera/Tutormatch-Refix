@@ -15,6 +15,7 @@ from ..errors import (
     EmailDeliveryFailed,
     EmailDeliveryUnavailable,
     InvalidCredentials,
+    InvalidCurrentPassword,
     InvalidEmailVerification,
     InvalidProfile,
     InvalidToken,
@@ -83,6 +84,7 @@ class AuthService:
         login_otp_challenges: LoginOTPChallengeService | None = None,
         captcha: CAPTCHAService | None = None,
         password_reset_rate_limiter: LoginRateLimiter | None = None,
+        change_password_rate_limiter: LoginRateLimiter | None = None,
         login_otp_required: bool = False,
     ) -> None:
         self._users = users
@@ -105,6 +107,9 @@ class AuthService:
         self._captcha = captcha or CAPTCHAService()
         self._password_reset_rate_limiter = (
             password_reset_rate_limiter or LoginRateLimiter(3, 900)
+        )
+        self._change_password_rate_limiter = (
+            change_password_rate_limiter or LoginRateLimiter(5, 900)
         )
         self._login_otp_required = login_otp_required
         # Refresh rotation is a check-then-write operation. Without this lock,
@@ -406,6 +411,83 @@ class AuthService:
             email=str(current.email),
             client_key=client_key,
             detail="email OTP",
+        )
+
+    def change_password(
+        self,
+        *,
+        user: User,
+        current_password: str,
+        new_password: str,
+        client_key: str,
+    ) -> None:
+        """Change a signed-in user's password and revoke refresh sessions."""
+
+        rate_key = self._rate_key(client_key, user.id)
+        retry_after = self._change_password_rate_limiter.check(rate_key)
+        if retry_after is not None:
+            raise RateLimited(
+                retry_after,
+                detail=(
+                    "Too many password-change attempts. Try again later."
+                ),
+            )
+
+        if not self._passwords.verify(
+            current_password,
+            user.password_hash,
+        ):
+            self._change_password_rate_limiter.record_failure(rate_key)
+            self._security_events.record(
+                "password_change_failed",
+                user_id=user.id,
+                email=str(user.email),
+                client_key=client_key,
+            )
+            raise InvalidCurrentPassword()
+
+        if new_password == current_password:
+            raise InvalidProfile(
+                "New password must be different from the current password."
+            )
+
+        try:
+            validate_password_policy(
+                new_password,
+                email=str(user.email),
+                display_name=user.display_name,
+            )
+        except ValueError as exc:
+            raise InvalidProfile(str(exc)) from exc
+
+        password_hash = self._passwords.hash(new_password)
+        now = datetime.now(timezone.utc)
+        with self._refresh_lock:
+            with self._transaction():
+                current = self._users.get_by_id(user.id)
+                if current is None:
+                    raise InvalidToken()
+                self._users.update(
+                    current.model_copy(
+                        update={
+                            "password_hash": password_hash,
+                            "updated_at": now,
+                        }
+                    )
+                )
+                self._refresh_tokens.revoke_all_for_user(current.id)
+
+        self._email_otp.clear(
+            str(current.email),
+            scope=PASSWORD_RESET_OTP_SCOPE,
+        )
+        self._change_password_rate_limiter.clear(rate_key)
+        self._security_events.record(
+            "password_changed",
+            user_id=current.id,
+            email=str(current.email),
+            client_key=client_key,
+            detail="signed-in",
         )
 
     def _record_failure(

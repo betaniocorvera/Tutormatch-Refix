@@ -17,6 +17,7 @@ from ..models.verification import (
     PasswordResetRequestResponse,
 )
 from ..models.user import (
+    ChangePasswordRequest,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
@@ -106,6 +107,26 @@ def verify_login_otp(
         client_key=client_key,
     )
     return _auth_response(result, auth)
+
+
+@router.post(
+    "/password/change",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    user: CurrentUser,
+    auth: AuthServiceDep,
+) -> Response:
+    client_key = request.client.host if request.client else "unknown"
+    auth.change_password(
+        user=user,
+        current_password=payload.current_password,
+        new_password=payload.new_password,
+        client_key=client_key,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

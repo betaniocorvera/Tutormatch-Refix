@@ -63,6 +63,11 @@ class InvalidToken(AppError):
         )
 
 
+class InvalidCurrentPassword(AppError):
+    status_code = 422
+    detail = "Current password is incorrect."
+
+
 class UserNotFound(AppError):
     status_code = 404
     detail = "That user was not found."

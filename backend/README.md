@@ -315,6 +315,7 @@ The matching evaluation is included in the suite. Run just that check with:
 - `POST /auth/register` — `{email, display_name, role, password, phone?, area_id, subjects, security_questions, privacy_consent, privacy_policy_version}`
 - `POST /auth/login` — `{email, password}`; returns tokens, or a `202` OTP challenge when `LOGIN_OTP_REQUIRED=true`
 - `POST /auth/login/otp/verify` — `{challenge_id, code}`; returns tokens after a valid code
+- `POST /auth/password/change` — `{current_password, new_password}`; requires a bearer access token and revokes all refresh tokens
 - `POST /auth/password-reset/request` — `{email, captcha_id, captcha_answer}`; always returns the same `202` response
 - `POST /auth/password-reset/confirm` — `{email, code, new_password}`; changes the password and revokes all refresh tokens
 - `POST /auth/refresh` — `{refresh_token}`
@@ -349,6 +350,13 @@ token for the account. Reset codes expire after ten minutes, allow three
 attempts, and are consumed on use. If SMTP is not configured, the request returns
 a generic `503` for every address.
 
+Changing a password while signed in requires the current password and applies the
+same password policy. The new password must differ from the current one. A
+successful change revokes every refresh token, clears any pending password-reset
+code, and records a `password_changed` event. The current access token remains
+valid until it expires; the client must sign in again with the new password to
+get a fresh refresh token.
+
 Passwords are hashed with Argon2id through passlib. New passwords need at least
 10 characters, upper and lower case, a digit, a symbol, and must not be a common
 password or contain the account's email local part or name. Security answers are
@@ -362,12 +370,14 @@ on use. Login failures are rate-limited in memory per client IP and email, and
 an account-scoped lockout blocks the address for `LOGIN_LOCKOUT_SECONDS` after
 `LOGIN_LOCKOUT_ATTEMPTS` failures. Password-reset requests use a separate limiter
 controlled by `PASSWORD_RESET_RATE_LIMIT_ATTEMPTS` and
-`PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS`. The OTP services also keep their own
+`PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS`. Change-password attempts use their own
+limiter with the login rate-limit settings. The OTP services also keep their own
 attempt limits per email and scope, and only verify a code once. Login success,
-login failure, lockout, OTP send, OTP failure, password-reset request, and
-password-reset completion events are recorded in a bounded in-memory
-security-event list. Selected events also trigger a best-effort email to the
-account owner; the list remains the hand-off point for the security dashboard.
+login failure, lockout, OTP send, OTP failure, password-reset request,
+password-reset completion, password-change failure, and password-change
+completion events are recorded in a bounded in-memory security-event list.
+Selected events also trigger a best-effort email to the account owner; the list
+remains the hand-off point for the security dashboard.
 
 ## Profile endpoints
 

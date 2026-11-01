@@ -167,6 +167,10 @@ paths.
 - Forgot-password requests require a CAPTCHA, are rate-limited, and return the
   same response whether or not the email is registered. Reset codes are
   purpose-scoped, expire, allow three attempts, and are consumed on use.
+- Changing a password while signed in requires the current password and applies
+  the same policy. A successful change revokes every refresh token, clears any
+  pending reset code, and records a security event. The current access token
+  remains valid until it expires.
 - Email OTP delivery uses SMTP. The code appears only in the email body; it is
   never returned by an endpoint or written to logs. Missing or failed delivery
   returns a generic error and does not keep a pending code. When SMTP is
